@@ -214,24 +214,6 @@ ieee80211_rx_radiotap_hdrlen(struct ieee80211_local *local,
 	return len;
 }
 
-static void __ieee80211_queue_skb_to_iface(struct ieee80211_sub_if_data *sdata,
-					   struct sta_info *sta,
-					   struct sk_buff *skb)
-{
-	skb_queue_tail(&sdata->skb_queue, skb);
-	ieee80211_queue_work(&sdata->local->hw, &sdata->work);
-	if (sta)
-		sta->rx_stats.packets++;
-}
-
-static void ieee80211_queue_skb_to_iface(struct ieee80211_sub_if_data *sdata,
-					 struct sta_info *sta,
-					 struct sk_buff *skb)
-{
-	skb->protocol = 0;
-	__ieee80211_queue_skb_to_iface(sdata, sta, skb);
-}
-
 static void ieee80211_handle_mu_mimo_mon(struct ieee80211_sub_if_data *sdata,
 					 struct sk_buff *skb,
 					 int rtap_space)
@@ -272,7 +254,8 @@ static void ieee80211_handle_mu_mimo_mon(struct ieee80211_sub_if_data *sdata,
 	if (!skb)
 		return;
 
-	ieee80211_queue_skb_to_iface(sdata, NULL, skb);
+	skb_queue_tail(&sdata->skb_queue, skb);
+	ieee80211_queue_work(&sdata->local->hw, &sdata->work);
 }
 
 /*
@@ -1356,6 +1339,7 @@ static void ieee80211_rx_reorder_ampdu(struct ieee80211_rx_data *rx,
 				       struct sk_buff_head *frames)
 {
 	struct sk_buff *skb = rx->skb;
+	struct ieee80211_local *local = rx->local;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
 	struct sta_info *sta = rx->sta;
 	struct tid_ampdu_rx *tid_agg_rx;
@@ -1407,7 +1391,8 @@ static void ieee80211_rx_reorder_ampdu(struct ieee80211_rx_data *rx,
 	/* if this mpdu is fragmented - terminate rx aggregation session */
 	sc = le16_to_cpu(hdr->seq_ctrl);
 	if (sc & IEEE80211_SCTL_FRAG) {
-		ieee80211_queue_skb_to_iface(rx->sdata, NULL, skb);
+		skb_queue_tail(&rx->sdata->skb_queue, skb);
+		ieee80211_queue_work(&local->hw, &rx->sdata->work);
 		return;
 	}
 
@@ -1578,8 +1563,12 @@ static void sta_ps_start(struct sta_info *sta)
 
 	for (tid = 0; tid < IEEE80211_NUM_TIDS; tid++) {
 		struct ieee80211_txq *txq = sta->sta.txq[tid];
+		struct txq_info *txqi = to_txq_info(txq);
 
-		ieee80211_unschedule_txq(&local->hw, txq, false);
+		spin_lock(&local->active_txq_lock[txq->ac]);
+		if (!list_empty(&txqi->schedule_order))
+			list_del_init(&txqi->schedule_order);
+		spin_unlock(&local->active_txq_lock[txq->ac]);
 
 		if (txq_has_queue(txq))
 			set_bit(tid, &sta->txq_buffered_tids);
@@ -3020,8 +3009,11 @@ ieee80211_rx_h_data(struct ieee80211_rx_data *rx)
 		    tf->category == WLAN_CATEGORY_TDLS &&
 		    (tf->action_code == WLAN_TDLS_CHANNEL_SWITCH_REQUEST ||
 		     tf->action_code == WLAN_TDLS_CHANNEL_SWITCH_RESPONSE)) {
-			rx->skb->protocol = cpu_to_be16(ETH_P_TDLS);
-			__ieee80211_queue_skb_to_iface(sdata, rx->sta, rx->skb);
+			skb_queue_tail(&local->skb_queue_tdls_chsw, rx->skb);
+			schedule_work(&local->tdls_chsw_work);
+			if (rx->sta)
+				rx->sta->rx_stats.packets++;
+
 			return RX_QUEUED;
 		}
 	}
@@ -3501,7 +3493,10 @@ ieee80211_rx_h_action(struct ieee80211_rx_data *rx)
 	return RX_QUEUED;
 
  queue:
-	ieee80211_queue_skb_to_iface(sdata, rx->sta, rx->skb);
+	skb_queue_tail(&sdata->skb_queue, rx->skb);
+	ieee80211_queue_work(&local->hw, &sdata->work);
+	if (rx->sta)
+		rx->sta->rx_stats.packets++;
 	return RX_QUEUED;
 }
 
@@ -3649,7 +3644,10 @@ ieee80211_rx_h_ext(struct ieee80211_rx_data *rx)
 		return RX_DROP_MONITOR;
 
 	/* for now only beacons are ext, so queue them */
-	ieee80211_queue_skb_to_iface(sdata, rx->sta, rx->skb);
+	skb_queue_tail(&sdata->skb_queue, rx->skb);
+	ieee80211_queue_work(&rx->local->hw, &sdata->work);
+	if (rx->sta)
+		rx->sta->rx_stats.packets++;
 
 	return RX_QUEUED;
 }
@@ -3706,7 +3704,11 @@ ieee80211_rx_h_mgmt(struct ieee80211_rx_data *rx)
 		return RX_DROP_MONITOR;
 	}
 
-	ieee80211_queue_skb_to_iface(sdata, rx->sta, rx->skb);
+	/* queue up frame and kick off work to process it */
+	skb_queue_tail(&sdata->skb_queue, rx->skb);
+	ieee80211_queue_work(&rx->local->hw, &sdata->work);
+	if (rx->sta)
+		rx->sta->rx_stats.packets++;
 
 	return RX_QUEUED;
 }

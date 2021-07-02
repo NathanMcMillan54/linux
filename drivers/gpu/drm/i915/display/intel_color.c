@@ -23,7 +23,6 @@
  */
 
 #include "intel_color.h"
-#include "intel_de.h"
 #include "intel_display_types.h"
 
 #define CTM_COEFF_SIGN	(1ULL << 63)
@@ -226,7 +225,7 @@ static bool ilk_csc_limited_range(const struct intel_crtc_state *crtc_state)
 	 */
 	return crtc_state->limited_color_range &&
 		(IS_HASWELL(dev_priv) || IS_BROADWELL(dev_priv) ||
-		 IS_DISPLAY_VER(dev_priv, 9, 10));
+		 IS_DISPLAY_RANGE(dev_priv, 9, 10));
 }
 
 static void ilk_csc_convert_ctm(const struct intel_crtc_state *crtc_state,
@@ -1712,7 +1711,7 @@ int intel_color_get_gamma_bit_precision(const struct intel_crtc_state *crtc_stat
 	} else {
 		if (DISPLAY_VER(dev_priv) >= 11)
 			return icl_gamma_precision(crtc_state);
-		else if (DISPLAY_VER(dev_priv) == 10)
+		else if (IS_DISPLAY_VER(dev_priv, 10))
 			return glk_gamma_precision(crtc_state);
 		else if (IS_IRONLAKE(dev_priv))
 			return ilk_gamma_precision(crtc_state);
@@ -2137,7 +2136,7 @@ void intel_color_init(struct intel_crtc *crtc)
 		if (DISPLAY_VER(dev_priv) >= 11) {
 			dev_priv->display.load_luts = icl_load_luts;
 			dev_priv->display.read_luts = icl_read_luts;
-		} else if (DISPLAY_VER(dev_priv) == 10) {
+		} else if (IS_DISPLAY_VER(dev_priv, 10)) {
 			dev_priv->display.load_luts = glk_load_luts;
 			dev_priv->display.read_luts = glk_read_luts;
 		} else if (DISPLAY_VER(dev_priv) >= 8) {

@@ -276,8 +276,7 @@ static int reg_fixed_voltage_probe(struct platform_device *pdev)
 	 */
 	cfg.ena_gpiod = gpiod_get_optional(&pdev->dev, NULL, gflags);
 	if (IS_ERR(cfg.ena_gpiod))
-		return dev_err_probe(&pdev->dev, PTR_ERR(cfg.ena_gpiod),
-				     "can't get GPIO\n");
+		return PTR_ERR(cfg.ena_gpiod);
 
 	cfg.dev = &pdev->dev;
 	cfg.init_data = config->init_data;

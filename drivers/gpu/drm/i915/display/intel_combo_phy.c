@@ -4,7 +4,6 @@
  */
 
 #include "intel_combo_phy.h"
-#include "intel_de.h"
 #include "intel_display_types.h"
 
 #define for_each_combo_phy(__dev_priv, __phy) \

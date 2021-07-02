@@ -49,7 +49,6 @@ TARGETS += proc
 TARGETS += pstore
 TARGETS += ptrace
 TARGETS += openat2
-TARGETS += rlimits
 TARGETS += rseq
 TARGETS += rtc
 TARGETS += seccomp

@@ -2,6 +2,7 @@
 /*
  * Copyright (C) 2017-2018 HUAWEI, Inc.
  *             https://www.huawei.com/
+ * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #include <linux/module.h>
 #include <linux/buffer_head.h>
@@ -284,7 +285,6 @@ static int erofs_read_superblock(struct super_block *sb)
 			goto out;
 	}
 
-	ret = -EINVAL;
 	blkszbits = dsb->blkszbits;
 	/* 9(512 bytes) + LOG_SECTORS_PER_BLOCK == LOG_BLOCK_SIZE */
 	if (blkszbits != LOG_BLOCK_SIZE) {
@@ -751,3 +751,4 @@ module_exit(erofs_module_exit);
 MODULE_DESCRIPTION("Enhanced ROM File System");
 MODULE_AUTHOR("Gao Xiang, Chao Yu, Miao Xie, CONSUMER BG, HUAWEI Inc.");
 MODULE_LICENSE("GPL");
+

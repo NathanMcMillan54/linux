@@ -218,7 +218,7 @@ static struct attribute *pmt_crashlog_attrs[] = {
 	NULL
 };
 
-static const struct attribute_group pmt_crashlog_group = {
+static struct attribute_group pmt_crashlog_group = {
 	.attrs	= pmt_crashlog_attrs,
 };
 

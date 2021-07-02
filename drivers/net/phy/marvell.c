@@ -367,24 +367,39 @@ static irqreturn_t marvell_handle_interrupt(struct phy_device *phydev)
 
 static int marvell_set_polarity(struct phy_device *phydev, int polarity)
 {
-	u16 val;
+	int reg;
+	int err;
+	int val;
 
+	/* get the current settings */
+	reg = phy_read(phydev, MII_M1011_PHY_SCR);
+	if (reg < 0)
+		return reg;
+
+	val = reg;
+	val &= ~MII_M1011_PHY_SCR_AUTO_CROSS;
 	switch (polarity) {
 	case ETH_TP_MDI:
-		val = MII_M1011_PHY_SCR_MDI;
+		val |= MII_M1011_PHY_SCR_MDI;
 		break;
 	case ETH_TP_MDI_X:
-		val = MII_M1011_PHY_SCR_MDI_X;
+		val |= MII_M1011_PHY_SCR_MDI_X;
 		break;
 	case ETH_TP_MDI_AUTO:
 	case ETH_TP_MDI_INVALID:
 	default:
-		val = MII_M1011_PHY_SCR_AUTO_CROSS;
+		val |= MII_M1011_PHY_SCR_AUTO_CROSS;
 		break;
 	}
 
-	return phy_modify_changed(phydev, MII_M1011_PHY_SCR,
-				  MII_M1011_PHY_SCR_AUTO_CROSS, val);
+	if (val != reg) {
+		/* Set the new polarity value in the register */
+		err = phy_write(phydev, MII_M1011_PHY_SCR, val);
+		if (err)
+			return err;
+	}
+
+	return val != reg;
 }
 
 static int marvell_config_aneg(struct phy_device *phydev)
@@ -809,19 +824,14 @@ static int m88e1111_config_init_rgmii_delays(struct phy_device *phydev)
 {
 	int delay;
 
-	switch (phydev->interface) {
-	case PHY_INTERFACE_MODE_RGMII_ID:
+	if (phydev->interface == PHY_INTERFACE_MODE_RGMII_ID) {
 		delay = MII_M1111_RGMII_RX_DELAY | MII_M1111_RGMII_TX_DELAY;
-		break;
-	case PHY_INTERFACE_MODE_RGMII_RXID:
+	} else if (phydev->interface == PHY_INTERFACE_MODE_RGMII_RXID) {
 		delay = MII_M1111_RGMII_RX_DELAY;
-		break;
-	case PHY_INTERFACE_MODE_RGMII_TXID:
+	} else if (phydev->interface == PHY_INTERFACE_MODE_RGMII_TXID) {
 		delay = MII_M1111_RGMII_TX_DELAY;
-		break;
-	default:
+	} else {
 		delay = 0;
-		break;
 	}
 
 	return phy_modify(phydev, MII_M1111_PHY_EXT_CR,

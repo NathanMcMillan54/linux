@@ -50,8 +50,6 @@ struct ib_uqp_object;
 struct ib_usrq_object;
 struct ib_uwq_object;
 struct rdma_cm_id;
-struct ib_port;
-struct hw_stats_device_data;
 
 extern struct workqueue_struct *ib_wq;
 extern struct workqueue_struct *ib_comp_wq;
@@ -2141,6 +2139,7 @@ struct ib_flow_action {
 };
 
 struct ib_mad;
+struct ib_grh;
 
 enum ib_process_mad_flags {
 	IB_MAD_IGNORE_MKEY	= 1,
@@ -2176,17 +2175,15 @@ struct ib_port_data {
 	struct ib_port_immutable immutable;
 
 	spinlock_t pkey_list_lock;
-
-	spinlock_t netdev_lock;
-
 	struct list_head pkey_list;
 
 	struct ib_port_cache cache;
 
+	spinlock_t netdev_lock;
 	struct net_device __rcu *netdev;
 	struct hlist_node ndev_hash_link;
 	struct rdma_port_counter port_counter;
-	struct ib_port *sysfs;
+	struct rdma_hw_stats *hw_stats;
 };
 
 /* rdma netdev type - specifies protocol type */
@@ -2301,14 +2298,6 @@ struct ib_device_ops {
 	enum rdma_driver_id driver_id;
 	u32 uverbs_abi_ver;
 	unsigned int uverbs_no_driver_id_binding:1;
-
-	/*
-	 * NOTE: New drivers should not make use of device_group; instead new
-	 * device parameter should be exposed via netlink command. This
-	 * mechanism exists only for existing drivers.
-	 */
-	const struct attribute_group *device_group;
-	const struct attribute_group **port_groups;
 
 	int (*post_send)(struct ib_qp *qp, const struct ib_send_wr *send_wr,
 			 const struct ib_send_wr **bad_send_wr);
@@ -2470,14 +2459,6 @@ struct ib_device_ops {
 			 enum ib_uverbs_advise_mr_advice advice, u32 flags,
 			 struct ib_sge *sg_list, u32 num_sge,
 			 struct uverbs_attr_bundle *attrs);
-
-	/*
-	 * Kernel users should universally support relaxed ordering (RO), as
-	 * they are designed to read data only after observing the CQE and use
-	 * the DMA API correctly.
-	 *
-	 * Some drivers implicitly enable RO if platform supports it.
-	 */
 	int (*map_mr_sg)(struct ib_mr *mr, struct scatterlist *sg, int sg_nents,
 			 unsigned int *sg_offset);
 	int (*check_mr_status)(struct ib_mr *mr, u32 check_mask,
@@ -2542,14 +2523,13 @@ struct ib_device_ops {
 			    unsigned int *meta_sg_offset);
 
 	/**
-	 * alloc_hw_[device,port]_stats - Allocate a struct rdma_hw_stats and
-	 *   fill in the driver initialized data.  The struct is kfree()'ed by
-	 *   the sysfs core when the device is removed.  A lifespan of -1 in the
-	 *   return struct tells the core to set a default lifespan.
+	 * alloc_hw_stats - Allocate a struct rdma_hw_stats and fill in the
+	 *   driver initialized data.  The struct is kfree()'ed by the sysfs
+	 *   core when the device is removed.  A lifespan of -1 in the return
+	 *   struct tells the core to set a default lifespan.
 	 */
-	struct rdma_hw_stats *(*alloc_hw_device_stats)(struct ib_device *device);
-	struct rdma_hw_stats *(*alloc_hw_port_stats)(struct ib_device *device,
-						     u32 port_num);
+	struct rdma_hw_stats *(*alloc_hw_stats)(struct ib_device *device,
+						u32 port_num);
 	/**
 	 * get_hw_stats - Fill in the counter value(s) in the stats struct.
 	 * @index - The index in the value array we wish to have updated, or
@@ -2564,7 +2544,12 @@ struct ib_device_ops {
 	 */
 	int (*get_hw_stats)(struct ib_device *device,
 			    struct rdma_hw_stats *stats, u32 port, int index);
-
+	/*
+	 * This function is called once for each port when a ib device is
+	 * registered.
+	 */
+	int (*init_port)(struct ib_device *device, u32 port_num,
+			 struct kobject *port_sysfs);
 	/**
 	 * Allows rdma drivers to add their own restrack attributes.
 	 */
@@ -2690,12 +2675,11 @@ struct ib_device {
 		struct ib_core_device	coredev;
 	};
 
-	/* First group is for device attributes,
-	 * Second group is for driver provided attributes (optional).
-	 * Third group is for the hw_stats
-	 * It is a NULL terminated array.
+	/* First group for device attributes,
+	 * Second group for driver provided attributes (optional).
+	 * It is NULL terminated array.
 	 */
-	const struct attribute_group	*groups[4];
+	const struct attribute_group	*groups[3];
 
 	u64			     uverbs_cmd_mask;
 
@@ -2710,7 +2694,8 @@ struct ib_device {
 	u8                           node_type;
 	u32			     phys_port_cnt;
 	struct ib_device_attr        attrs;
-	struct hw_stats_device_data *hw_stats_data;
+	struct attribute_group	     *hw_stats_ag;
+	struct rdma_hw_stats         *hw_stats;
 
 #ifdef CONFIG_CGROUP_RDMA
 	struct rdmacg_device         cg_device;
@@ -4301,6 +4286,8 @@ struct net_device *ib_device_netdev(struct ib_device *dev, u32 port);
 struct ib_wq *ib_create_wq(struct ib_pd *pd,
 			   struct ib_wq_init_attr *init_attr);
 int ib_destroy_wq_user(struct ib_wq *wq, struct ib_udata *udata);
+int ib_modify_wq(struct ib_wq *wq, struct ib_wq_attr *attr,
+		 u32 wq_attr_mask);
 
 int ib_map_mr_sg(struct ib_mr *mr, struct scatterlist *sg, int sg_nents,
 		 unsigned int *sg_offset, unsigned int page_size);
@@ -4584,6 +4571,28 @@ int rdma_init_netdev(struct ib_device *device, u32 port_num,
 		     struct net_device *netdev);
 
 /**
+ * rdma_set_device_sysfs_group - Set device attributes group to have
+ *				 driver specific sysfs entries at
+ *				 for infiniband class.
+ *
+ * @device:	device pointer for which attributes to be created
+ * @group:	Pointer to group which should be added when device
+ *		is registered with sysfs.
+ * rdma_set_device_sysfs_group() allows existing drivers to expose one
+ * group per device to have sysfs attributes.
+ *
+ * NOTE: New drivers should not make use of this API; instead new device
+ * parameter should be exposed via netlink command. This API and mechanism
+ * exist only for existing drivers.
+ */
+static inline void
+rdma_set_device_sysfs_group(struct ib_device *dev,
+			    const struct attribute_group *group)
+{
+	dev->groups[1] = group;
+}
+
+/**
  * rdma_device_to_ibdev - Get ib_device pointer from device pointer
  *
  * @device:	device pointer for which ib_device pointer to retrieve
@@ -4618,7 +4627,7 @@ static inline int ibdev_to_node(struct ib_device *ibdev)
  *
  * NOTE: New drivers should not make use of this API; This API is only for
  * existing drivers who have exposed sysfs entries using
- * ops->device_group.
+ * rdma_set_device_sysfs_group().
  */
 #define rdma_device_to_drv_device(dev, drv_dev_struct, ibdev_member)           \
 	container_of(rdma_device_to_ibdev(dev), drv_dev_struct, ibdev_member)

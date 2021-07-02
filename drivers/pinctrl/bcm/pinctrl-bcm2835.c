@@ -1274,13 +1274,9 @@ static int bcm2835_pinctrl_probe(struct platform_device *pdev)
 		char *name;
 
 		girq->parents[i] = irq_of_parse_and_map(np, i);
-		if (!is_7211) {
-			if (!girq->parents[i]) {
-				girq->num_parents = i;
-				break;
-			}
+		if (!is_7211)
 			continue;
-		}
+
 		/* Skip over the all banks interrupts */
 		pc->wake_irq[i] = irq_of_parse_and_map(np, i +
 						       BCM2835_NUM_IRQS + 1);

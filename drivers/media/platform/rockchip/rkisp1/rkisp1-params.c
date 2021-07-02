@@ -1258,10 +1258,7 @@ void rkisp1_params_configure(struct rkisp1_params *params,
 	rkisp1_params_config_parameter(params);
 }
 
-/*
- * Not called when the camera is active, therefore there is no need to acquire
- * a lock.
- */
+/* Not called when the camera active, thus not isr protection. */
 void rkisp1_params_disable(struct rkisp1_params *params)
 {
 	rkisp1_param_clear_bits(params, RKISP1_CIF_ISP_DPCC_MODE,

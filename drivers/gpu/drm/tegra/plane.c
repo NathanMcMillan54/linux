@@ -375,29 +375,13 @@ int tegra_plane_format(u32 fourcc, u32 *format, u32 *swap)
 	return 0;
 }
 
-bool tegra_plane_format_is_indexed(unsigned int format)
-{
-	switch (format) {
-	case WIN_COLOR_DEPTH_P1:
-	case WIN_COLOR_DEPTH_P2:
-	case WIN_COLOR_DEPTH_P4:
-	case WIN_COLOR_DEPTH_P8:
-		return true;
-	}
-
-	return false;
-}
-
-bool tegra_plane_format_is_yuv(unsigned int format, bool *planar, unsigned int *bpc)
+bool tegra_plane_format_is_yuv(unsigned int format, bool *planar)
 {
 	switch (format) {
 	case WIN_COLOR_DEPTH_YCbCr422:
 	case WIN_COLOR_DEPTH_YUV422:
 		if (planar)
 			*planar = false;
-
-		if (bpc)
-			*bpc = 8;
 
 		return true;
 
@@ -411,9 +395,6 @@ bool tegra_plane_format_is_yuv(unsigned int format, bool *planar, unsigned int *
 	case WIN_COLOR_DEPTH_YUV422RA:
 		if (planar)
 			*planar = true;
-
-		if (bpc)
-			*bpc = 8;
 
 		return true;
 	}
@@ -440,7 +421,7 @@ static bool __drm_format_has_alpha(u32 format)
 static int tegra_plane_format_get_alpha(unsigned int opaque,
 					unsigned int *alpha)
 {
-	if (tegra_plane_format_is_yuv(opaque, NULL, NULL)) {
+	if (tegra_plane_format_is_yuv(opaque, NULL)) {
 		*alpha = opaque;
 		return 0;
 	}

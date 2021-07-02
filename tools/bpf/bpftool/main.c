@@ -29,7 +29,6 @@ bool show_pinned;
 bool block_mount;
 bool verifier_logs;
 bool relaxed_maps;
-bool use_loader;
 struct btf *base_btf;
 struct pinned_obj_table prog_table;
 struct pinned_obj_table map_table;
@@ -341,10 +340,8 @@ static int do_batch(int argc, char **argv)
 		n_argc = make_args(buf, n_argv, BATCH_ARG_NB_MAX, lines);
 		if (!n_argc)
 			continue;
-		if (n_argc < 0) {
-			err = n_argc;
+		if (n_argc < 0)
 			goto err_close;
-		}
 
 		if (json_output) {
 			jsonw_start_object(json_wtr);
@@ -395,7 +392,6 @@ int main(int argc, char **argv)
 		{ "mapcompat",	no_argument,	NULL,	'm' },
 		{ "nomount",	no_argument,	NULL,	'n' },
 		{ "debug",	no_argument,	NULL,	'd' },
-		{ "use-loader",	no_argument,	NULL,	'L' },
 		{ "base-btf",	required_argument, NULL, 'B' },
 		{ 0 }
 	};
@@ -413,7 +409,7 @@ int main(int argc, char **argv)
 	hash_init(link_table.table);
 
 	opterr = 0;
-	while ((opt = getopt_long(argc, argv, "VhpjfLmndB:",
+	while ((opt = getopt_long(argc, argv, "VhpjfmndB:",
 				  options, NULL)) >= 0) {
 		switch (opt) {
 		case 'V':
@@ -455,9 +451,6 @@ int main(int argc, char **argv)
 				base_btf = NULL;
 				return -1;
 			}
-			break;
-		case 'L':
-			use_loader = true;
 			break;
 		default:
 			p_err("unrecognized option '%s'", argv[optind - 1]);

@@ -206,7 +206,8 @@ static int nvmet_passthru_map_sg(struct nvmet_req *req, struct request *rq)
 	for_each_sg(req->sg, sg, req->sg_cnt, i) {
 		if (bio_add_pc_page(rq->q, bio, sg_page(sg), sg->length,
 				    sg->offset) < sg->length) {
-			nvmet_req_bio_put(req, bio);
+			if (bio != &req->p.inline_bio)
+				bio_put(bio);
 			return -EINVAL;
 		}
 	}

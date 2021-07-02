@@ -120,7 +120,8 @@ static void free_partitions(struct parsed_partitions *state)
 	kfree(state);
 }
 
-static struct parsed_partitions *check_partition(struct gendisk *hd)
+static struct parsed_partitions *check_partition(struct gendisk *hd,
+		struct block_device *bdev)
 {
 	struct parsed_partitions *state;
 	int i, res, err;
@@ -135,7 +136,7 @@ static struct parsed_partitions *check_partition(struct gendisk *hd)
 	}
 	state->pp_buf[0] = '\0';
 
-	state->bdev = hd->part0;
+	state->bdev = bdev;
 	disk_name(hd, 0, state->name);
 	snprintf(state->pp_buf, PAGE_SIZE, " %s:", state->name);
 	if (isdigit(state->name[strlen(state->name)-1]))
@@ -259,8 +260,7 @@ static const struct attribute_group *part_attr_groups[] = {
 
 static void part_release(struct device *dev)
 {
-	if (MAJOR(dev->devt) == BLOCK_EXT_MAJOR)
-		blk_free_ext_minor(MINOR(dev->devt));
+	blk_free_devt(dev->devt);
 	bdput(dev_to_bdev(dev));
 }
 
@@ -282,7 +282,7 @@ struct device_type part_type = {
 };
 
 /*
- * Must be called either with open_mutex held, before a disk can be opened or
+ * Must be called either with bd_mutex held, before a disk can be opened or
  * after all disk users are gone.
  */
 static void delete_partition(struct block_device *part)
@@ -311,7 +311,7 @@ static ssize_t whole_disk_show(struct device *dev,
 static DEVICE_ATTR(whole_disk, 0444, whole_disk_show, NULL);
 
 /*
- * Must be called either with open_mutex held, before a disk can be opened or
+ * Must be called either with bd_mutex held, before a disk can be opened or
  * after all disk users are gone.
  */
 static struct block_device *add_partition(struct gendisk *disk, int partno,
@@ -325,8 +325,10 @@ static struct block_device *add_partition(struct gendisk *disk, int partno,
 	const char *dname;
 	int err;
 
-	lockdep_assert_held(&disk->open_mutex);
-
+	/*
+	 * disk_max_parts() won't be zero, either GENHD_FL_EXT_DEVT is set
+	 * or 'minors' is passed to alloc_disk().
+	 */
 	if (partno >= disk_max_parts(disk))
 		return ERR_PTR(-EINVAL);
 
@@ -377,15 +379,9 @@ static struct block_device *add_partition(struct gendisk *disk, int partno,
 	pdev->type = &part_type;
 	pdev->parent = ddev;
 
-	/* in consecutive minor range? */
-	if (bdev->bd_partno < disk->minors) {
-		devt = MKDEV(disk->major, disk->first_minor + bdev->bd_partno);
-	} else {
-		err = blk_alloc_ext_minor();
-		if (err < 0)
-			goto out_put;
-		devt = MKDEV(BLOCK_EXT_MAJOR, err);
-	}
+	err = blk_alloc_devt(bdev, &devt);
+	if (err)
+		goto out_put;
 	pdev->devt = devt;
 
 	/* delay uevent until 'holders' subdir is created */
@@ -454,27 +450,29 @@ int bdev_add_partition(struct block_device *bdev, int partno,
 {
 	struct block_device *part;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
+	mutex_lock(&bdev->bd_mutex);
 	if (partition_overlaps(bdev->bd_disk, start, length, -1)) {
-		mutex_unlock(&bdev->bd_disk->open_mutex);
+		mutex_unlock(&bdev->bd_mutex);
 		return -EBUSY;
 	}
 
 	part = add_partition(bdev->bd_disk, partno, start, length,
 			ADDPART_FLAG_NONE, NULL);
-	mutex_unlock(&bdev->bd_disk->open_mutex);
+	mutex_unlock(&bdev->bd_mutex);
 	return PTR_ERR_OR_ZERO(part);
 }
 
 int bdev_del_partition(struct block_device *bdev, int partno)
 {
-	struct block_device *part = NULL;
-	int ret = -ENXIO;
+	struct block_device *part;
+	int ret;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
-	part = xa_load(&bdev->bd_disk->part_tbl, partno);
+	part = bdget_disk(bdev->bd_disk, partno);
 	if (!part)
-		goto out_unlock;
+		return -ENXIO;
+
+	mutex_lock(&part->bd_mutex);
+	mutex_lock_nested(&bdev->bd_mutex, 1);
 
 	ret = -EBUSY;
 	if (part->bd_openers)
@@ -483,21 +481,24 @@ int bdev_del_partition(struct block_device *bdev, int partno)
 	delete_partition(part);
 	ret = 0;
 out_unlock:
-	mutex_unlock(&bdev->bd_disk->open_mutex);
+	mutex_unlock(&bdev->bd_mutex);
+	mutex_unlock(&part->bd_mutex);
+	bdput(part);
 	return ret;
 }
 
 int bdev_resize_partition(struct block_device *bdev, int partno,
 		sector_t start, sector_t length)
 {
-	struct block_device *part = NULL;
-	int ret = -ENXIO;
+	struct block_device *part;
+	int ret = 0;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
-	part = xa_load(&bdev->bd_disk->part_tbl, partno);
+	part = bdget_disk(bdev->bd_disk, partno);
 	if (!part)
-		goto out_unlock;
+		return -ENXIO;
 
+	mutex_lock(&part->bd_mutex);
+	mutex_lock_nested(&bdev->bd_mutex, 1);
 	ret = -EINVAL;
 	if (start != part->bd_start_sect)
 		goto out_unlock;
@@ -510,7 +511,9 @@ int bdev_resize_partition(struct block_device *bdev, int partno,
 
 	ret = 0;
 out_unlock:
-	mutex_unlock(&bdev->bd_disk->open_mutex);
+	mutex_unlock(&part->bd_mutex);
+	mutex_unlock(&bdev->bd_mutex);
+	bdput(part);
 	return ret;
 }
 
@@ -535,7 +538,7 @@ void blk_drop_partitions(struct gendisk *disk)
 	struct block_device *part;
 	unsigned long idx;
 
-	lockdep_assert_held(&disk->open_mutex);
+	lockdep_assert_held(&disk->part0->bd_mutex);
 
 	xa_for_each_start(&disk->part_tbl, idx, part, 1) {
 		if (!bdgrab(part))
@@ -545,7 +548,7 @@ void blk_drop_partitions(struct gendisk *disk)
 	}
 }
 
-static bool blk_add_partition(struct gendisk *disk,
+static bool blk_add_partition(struct gendisk *disk, struct block_device *bdev,
 		struct parsed_partitions *state, int p)
 {
 	sector_t size = state->parts[p].size;
@@ -595,7 +598,7 @@ static bool blk_add_partition(struct gendisk *disk,
 	return true;
 }
 
-static int blk_add_partitions(struct gendisk *disk)
+int blk_add_partitions(struct gendisk *disk, struct block_device *bdev)
 {
 	struct parsed_partitions *state;
 	int ret = -EAGAIN, p;
@@ -603,7 +606,7 @@ static int blk_add_partitions(struct gendisk *disk)
 	if (!disk_part_scan_enabled(disk))
 		return 0;
 
-	state = check_partition(disk);
+	state = check_partition(disk, bdev);
 	if (!state)
 		return 0;
 	if (IS_ERR(state)) {
@@ -647,7 +650,7 @@ static int blk_add_partitions(struct gendisk *disk)
 	kobject_uevent(&disk_to_dev(disk)->kobj, KOBJ_CHANGE);
 
 	for (p = 1; p < state->limit; p++)
-		if (!blk_add_partition(disk, state, p))
+		if (!blk_add_partition(disk, bdev, state, p))
 			goto out_free_state;
 
 	ret = 0;
@@ -655,58 +658,6 @@ out_free_state:
 	free_partitions(state);
 	return ret;
 }
-
-int bdev_disk_changed(struct gendisk *disk, bool invalidate)
-{
-	int ret = 0;
-
-	lockdep_assert_held(&disk->open_mutex);
-
-	if (!(disk->flags & GENHD_FL_UP))
-		return -ENXIO;
-
-rescan:
-	if (disk->open_partitions)
-		return -EBUSY;
-	sync_blockdev(disk->part0);
-	invalidate_bdev(disk->part0);
-	blk_drop_partitions(disk);
-
-	clear_bit(GD_NEED_PART_SCAN, &disk->state);
-
-	/*
-	 * Historically we only set the capacity to zero for devices that
-	 * support partitions (independ of actually having partitions created).
-	 * Doing that is rather inconsistent, but changing it broke legacy
-	 * udisks polling for legacy ide-cdrom devices.  Use the crude check
-	 * below to get the sane behavior for most device while not breaking
-	 * userspace for this particular setup.
-	 */
-	if (invalidate) {
-		if (disk_part_scan_enabled(disk) ||
-		    !(disk->flags & GENHD_FL_REMOVABLE))
-			set_capacity(disk, 0);
-	}
-
-	if (get_capacity(disk)) {
-		ret = blk_add_partitions(disk);
-		if (ret == -EAGAIN)
-			goto rescan;
-	} else if (invalidate) {
-		/*
-		 * Tell userspace that the media / partition table may have
-		 * changed.
-		 */
-		kobject_uevent(&disk_to_dev(disk)->kobj, KOBJ_CHANGE);
-	}
-
-	return ret;
-}
-/*
- * Only exported for loop and dasd for historic reasons.  Don't use in new
- * code!
- */
-EXPORT_SYMBOL_GPL(bdev_disk_changed);
 
 void *read_part_sector(struct parsed_partitions *state, sector_t n, Sector *p)
 {

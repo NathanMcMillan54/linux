@@ -30,9 +30,7 @@
 #include <linux/vga_switcheroo.h>
 #include <linux/mmu_notifier.h>
 
-#include <drm/drm_aperture.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_gem_ttm_helper.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_vblank.h>
 
@@ -738,7 +736,7 @@ static int nouveau_drm_probe(struct pci_dev *pdev,
 	nvkm_device_del(&device);
 
 	/* Remove conflicting drivers (vesafb, efifb etc). */
-	ret = drm_aperture_remove_conflicting_pci_framebuffers(pdev, "nouveaufb");
+	ret = drm_fb_helper_remove_conflicting_pci_framebuffers(pdev, "nouveaufb");
 	if (ret)
 		return ret;
 
@@ -1179,7 +1177,7 @@ nouveau_driver_fops = {
 	.open = drm_open,
 	.release = drm_release,
 	.unlocked_ioctl = nouveau_drm_ioctl,
-	.mmap = drm_gem_mmap,
+	.mmap = nouveau_ttm_mmap,
 	.poll = drm_poll,
 	.read = drm_read,
 #if defined(CONFIG_COMPAT)
@@ -1212,10 +1210,9 @@ driver_stub = {
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_prime_import_sg_table = nouveau_gem_prime_import_sg_table,
-	.gem_prime_mmap = drm_gem_prime_mmap,
 
 	.dumb_create = nouveau_display_dumb_create,
-	.dumb_map_offset = drm_gem_ttm_dumb_map_offset,
+	.dumb_map_offset = nouveau_display_dumb_map_offset,
 
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,

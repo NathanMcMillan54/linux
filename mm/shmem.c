@@ -1695,9 +1695,8 @@ static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 {
 	struct address_space *mapping = inode->i_mapping;
 	struct shmem_inode_info *info = SHMEM_I(inode);
-	struct mm_struct *charge_mm = vma ? vma->vm_mm : NULL;
-	struct swap_info_struct *si;
-	struct page *page = NULL;
+	struct mm_struct *charge_mm = vma ? vma->vm_mm : current->mm;
+	struct page *page;
 	swp_entry_t swap;
 	int error;
 
@@ -1705,12 +1704,6 @@ static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 	swap = radix_to_swp_entry(*pagep);
 	*pagep = NULL;
 
-	/* Prevent swapoff from happening to us. */
-	si = get_swap_device(swap);
-	if (!si) {
-		error = EINVAL;
-		goto failed;
-	}
 	/* Look it up and read it in.. */
 	page = lookup_swap_cache(swap, NULL, 0);
 	if (!page) {
@@ -1772,8 +1765,6 @@ static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 	swap_free(swap);
 
 	*pagep = page;
-	if (si)
-		put_swap_device(si);
 	return 0;
 failed:
 	if (!shmem_confirm_swap(mapping, index, swap))
@@ -1783,9 +1774,6 @@ unlock:
 		unlock_page(page);
 		put_page(page);
 	}
-
-	if (si)
-		put_swap_device(si);
 
 	return error;
 }
@@ -1828,7 +1816,7 @@ repeat:
 	}
 
 	sbinfo = SHMEM_SB(inode->i_sb);
-	charge_mm = vma ? vma->vm_mm : NULL;
+	charge_mm = vma ? vma->vm_mm : current->mm;
 
 	page = pagecache_get_page(mapping, index,
 					FGP_ENTRY | FGP_HEAD | FGP_LOCK, 0);
@@ -2239,7 +2227,7 @@ static struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 }
 #endif
 
-int shmem_lock(struct file *file, int lock, struct ucounts *ucounts)
+int shmem_lock(struct file *file, int lock, struct user_struct *user)
 {
 	struct inode *inode = file_inode(file);
 	struct shmem_inode_info *info = SHMEM_I(inode);
@@ -2251,13 +2239,13 @@ int shmem_lock(struct file *file, int lock, struct ucounts *ucounts)
 	 * no serialization needed when called from shm_destroy().
 	 */
 	if (lock && !(info->flags & VM_LOCKED)) {
-		if (!user_shm_lock(inode->i_size, ucounts))
+		if (!user_shm_lock(inode->i_size, user))
 			goto out_nomem;
 		info->flags |= VM_LOCKED;
 		mapping_set_unevictable(file->f_mapping);
 	}
-	if (!lock && (info->flags & VM_LOCKED) && ucounts) {
-		user_shm_unlock(inode->i_size, ucounts);
+	if (!lock && (info->flags & VM_LOCKED) && user) {
+		user_shm_unlock(inode->i_size, user);
 		info->flags &= ~VM_LOCKED;
 		mapping_clear_unevictable(file->f_mapping);
 	}
@@ -4104,7 +4092,7 @@ int shmem_unuse(unsigned int type, bool frontswap,
 	return 0;
 }
 
-int shmem_lock(struct file *file, int lock, struct ucounts *ucounts)
+int shmem_lock(struct file *file, int lock, struct user_struct *user)
 {
 	return 0;
 }

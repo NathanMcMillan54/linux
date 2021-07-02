@@ -18,7 +18,6 @@
 #include <linux/extable.h>
 #include <linux/ftrace.h>
 #include <linux/memblock.h>
-#include <linux/of.h>
 
 #include <asm/interrupt.h>
 #include <asm/machdep.h>

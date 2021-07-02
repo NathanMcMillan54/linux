@@ -312,7 +312,7 @@ struct hfi1_ctxtdata *hfi1_rcd_get_by_index_safe(struct hfi1_devdata *dd,
 }
 
 /**
- * hfi1_rcd_get_by_index - get by index
+ * hfi1_rcd_get_by_index
  * @dd: pointer to a valid devdata structure
  * @ctxt: the index of an possilbe rcd
  *
@@ -499,7 +499,7 @@ bail:
 }
 
 /**
- * hfi1_free_ctxt - free context
+ * hfi1_free_ctxt
  * @rcd: pointer to an initialized rcd data structure
  *
  * This wrapper is the free function that matches hfi1_create_ctxtdata().

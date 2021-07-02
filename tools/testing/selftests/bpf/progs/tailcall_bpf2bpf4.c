@@ -9,7 +9,7 @@ struct {
 	__uint(value_size, sizeof(__u32));
 } jmp_table SEC(".maps");
 
-int count = 0;
+static volatile int count;
 
 __noinline
 int subprog_tail_2(struct __sk_buff *skb)

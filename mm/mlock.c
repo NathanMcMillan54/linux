@@ -817,10 +817,9 @@ SYSCALL_DEFINE0(munlockall)
  */
 static DEFINE_SPINLOCK(shmlock_user_lock);
 
-int user_shm_lock(size_t size, struct ucounts *ucounts)
+int user_shm_lock(size_t size, struct user_struct *user)
 {
 	unsigned long lock_limit, locked;
-	long memlock;
 	int allowed = 0;
 
 	locked = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
@@ -829,26 +828,21 @@ int user_shm_lock(size_t size, struct ucounts *ucounts)
 		allowed = 1;
 	lock_limit >>= PAGE_SHIFT;
 	spin_lock(&shmlock_user_lock);
-	memlock = inc_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);
-
-	if (!allowed && (memlock == LONG_MAX || memlock > lock_limit) && !capable(CAP_IPC_LOCK)) {
-		dec_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);
+	if (!allowed &&
+	    locked + user->locked_shm > lock_limit && !capable(CAP_IPC_LOCK))
 		goto out;
-	}
-	if (!get_ucounts(ucounts)) {
-		dec_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);
-		goto out;
-	}
+	get_uid(user);
+	user->locked_shm += locked;
 	allowed = 1;
 out:
 	spin_unlock(&shmlock_user_lock);
 	return allowed;
 }
 
-void user_shm_unlock(size_t size, struct ucounts *ucounts)
+void user_shm_unlock(size_t size, struct user_struct *user)
 {
 	spin_lock(&shmlock_user_lock);
-	dec_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, (size + PAGE_SIZE - 1) >> PAGE_SHIFT);
+	user->locked_shm -= (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	spin_unlock(&shmlock_user_lock);
-	put_ucounts(ucounts);
+	free_uid(user);
 }

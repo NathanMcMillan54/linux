@@ -23,7 +23,7 @@ static void uc_expand_default_options(struct intel_uc *uc)
 		return;
 
 	/* Don't enable GuC/HuC on pre-Gen12 */
-	if (GRAPHICS_VER(i915) < 12) {
+	if (INTEL_GEN(i915) < 12) {
 		i915->params.enable_guc = 0;
 		return;
 	}
@@ -467,7 +467,7 @@ static int __uc_init_hw(struct intel_uc *uc)
 
 	/* WaEnableuKernelHeaderValidFix:skl */
 	/* WaEnableGuCBootHashCheckNotSet:skl,bxt,kbl */
-	if (GRAPHICS_VER(i915) == 9)
+	if (IS_GEN(i915, 9))
 		attempts = 3;
 	else
 		attempts = 1;
@@ -502,6 +502,10 @@ static int __uc_init_hw(struct intel_uc *uc)
 
 	intel_huc_auth(huc);
 
+	ret = intel_guc_sample_forcewake(guc);
+	if (ret)
+		goto err_communication;
+
 	if (intel_uc_uses_guc_submission(uc))
 		intel_guc_submission_enable(guc);
 
@@ -525,6 +529,8 @@ static int __uc_init_hw(struct intel_uc *uc)
 	/*
 	 * We've failed to load the firmware :(
 	 */
+err_communication:
+	guc_disable_communication(guc);
 err_log_capture:
 	__uc_capture_load_err_log(uc);
 err_out:
@@ -552,6 +558,9 @@ static void __uc_fini_hw(struct intel_uc *uc)
 	if (intel_uc_uses_guc_submission(uc))
 		intel_guc_submission_disable(guc);
 
+	if (guc_communication_enabled(guc))
+		guc_disable_communication(guc);
+
 	__uc_sanitize(uc);
 }
 
@@ -568,6 +577,7 @@ void intel_uc_reset_prepare(struct intel_uc *uc)
 	if (!intel_guc_is_ready(guc))
 		return;
 
+	guc_disable_communication(guc);
 	__uc_sanitize(uc);
 }
 

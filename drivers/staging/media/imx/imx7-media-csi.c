@@ -724,7 +724,7 @@ out_unlock:
 }
 
 static int imx7_csi_init_cfg(struct v4l2_subdev *sd,
-			     struct v4l2_subdev_state *sd_state)
+			     struct v4l2_subdev_pad_config *cfg)
 {
 	struct imx7_csi *csi = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *mf;
@@ -732,7 +732,7 @@ static int imx7_csi_init_cfg(struct v4l2_subdev *sd,
 	int i;
 
 	for (i = 0; i < IMX7_CSI_PADS_NUM; i++) {
-		mf = v4l2_subdev_get_try_format(sd, sd_state, i);
+		mf = v4l2_subdev_get_try_format(sd, cfg, i);
 
 		ret = imx_media_init_mbus_fmt(mf, 800, 600, 0, V4L2_FIELD_NONE,
 					      &csi->cc[i]);
@@ -745,18 +745,18 @@ static int imx7_csi_init_cfg(struct v4l2_subdev *sd,
 
 static struct v4l2_mbus_framefmt *
 imx7_csi_get_format(struct imx7_csi *csi,
-		    struct v4l2_subdev_state *sd_state,
+		    struct v4l2_subdev_pad_config *cfg,
 		    unsigned int pad,
 		    enum v4l2_subdev_format_whence which)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return v4l2_subdev_get_try_format(&csi->sd, sd_state, pad);
+		return v4l2_subdev_get_try_format(&csi->sd, cfg, pad);
 
 	return &csi->format_mbus[pad];
 }
 
 static int imx7_csi_enum_mbus_code(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_state *sd_state,
+				   struct v4l2_subdev_pad_config *cfg,
 				   struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct imx7_csi *csi = v4l2_get_subdevdata(sd);
@@ -765,8 +765,7 @@ static int imx7_csi_enum_mbus_code(struct v4l2_subdev *sd,
 
 	mutex_lock(&csi->lock);
 
-	in_fmt = imx7_csi_get_format(csi, sd_state, IMX7_CSI_PAD_SINK,
-				     code->which);
+	in_fmt = imx7_csi_get_format(csi, cfg, IMX7_CSI_PAD_SINK, code->which);
 
 	switch (code->pad) {
 	case IMX7_CSI_PAD_SINK:
@@ -792,7 +791,7 @@ out_unlock:
 }
 
 static int imx7_csi_get_fmt(struct v4l2_subdev *sd,
-			    struct v4l2_subdev_state *sd_state,
+			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_format *sdformat)
 {
 	struct imx7_csi *csi = v4l2_get_subdevdata(sd);
@@ -801,8 +800,7 @@ static int imx7_csi_get_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(&csi->lock);
 
-	fmt = imx7_csi_get_format(csi, sd_state, sdformat->pad,
-				  sdformat->which);
+	fmt = imx7_csi_get_format(csi, cfg, sdformat->pad, sdformat->which);
 	if (!fmt) {
 		ret = -EINVAL;
 		goto out_unlock;
@@ -817,7 +815,7 @@ out_unlock:
 }
 
 static int imx7_csi_try_fmt(struct imx7_csi *csi,
-			    struct v4l2_subdev_state *sd_state,
+			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_format *sdformat,
 			    const struct imx_media_pixfmt **cc)
 {
@@ -825,7 +823,7 @@ static int imx7_csi_try_fmt(struct imx7_csi *csi,
 	struct v4l2_mbus_framefmt *in_fmt;
 	u32 code;
 
-	in_fmt = imx7_csi_get_format(csi, sd_state, IMX7_CSI_PAD_SINK,
+	in_fmt = imx7_csi_get_format(csi, cfg, IMX7_CSI_PAD_SINK,
 				     sdformat->which);
 	if (!in_fmt)
 		return -EINVAL;
@@ -870,7 +868,7 @@ static int imx7_csi_try_fmt(struct imx7_csi *csi,
 }
 
 static int imx7_csi_set_fmt(struct v4l2_subdev *sd,
-			    struct v4l2_subdev_state *sd_state,
+			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_format *sdformat)
 {
 	struct imx7_csi *csi = v4l2_get_subdevdata(sd);
@@ -891,12 +889,11 @@ static int imx7_csi_set_fmt(struct v4l2_subdev *sd,
 		goto out_unlock;
 	}
 
-	ret = imx7_csi_try_fmt(csi, sd_state, sdformat, &cc);
+	ret = imx7_csi_try_fmt(csi, cfg, sdformat, &cc);
 	if (ret < 0)
 		goto out_unlock;
 
-	fmt = imx7_csi_get_format(csi, sd_state, sdformat->pad,
-				  sdformat->which);
+	fmt = imx7_csi_get_format(csi, cfg, sdformat->pad, sdformat->which);
 	if (!fmt) {
 		ret = -EINVAL;
 		goto out_unlock;
@@ -909,11 +906,11 @@ static int imx7_csi_set_fmt(struct v4l2_subdev *sd,
 		format.pad = IMX7_CSI_PAD_SRC;
 		format.which = sdformat->which;
 		format.format = sdformat->format;
-		if (imx7_csi_try_fmt(csi, sd_state, &format, &outcc)) {
+		if (imx7_csi_try_fmt(csi, cfg, &format, &outcc)) {
 			ret = -EINVAL;
 			goto out_unlock;
 		}
-		outfmt = imx7_csi_get_format(csi, sd_state, IMX7_CSI_PAD_SRC,
+		outfmt = imx7_csi_get_format(csi, cfg, IMX7_CSI_PAD_SRC,
 					     sdformat->which);
 		*outfmt = format.format;
 

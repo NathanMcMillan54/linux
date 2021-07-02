@@ -52,16 +52,10 @@ static struct vmwgfx_gmrid_man *to_gmrid_manager(struct ttm_resource_manager *ma
 static int vmw_gmrid_man_get_node(struct ttm_resource_manager *man,
 				  struct ttm_buffer_object *bo,
 				  const struct ttm_place *place,
-				  struct ttm_resource **res)
+				  struct ttm_resource *mem)
 {
 	struct vmwgfx_gmrid_man *gman = to_gmrid_manager(man);
 	int id;
-
-	*res = kmalloc(sizeof(**res), GFP_KERNEL);
-	if (!*res)
-		return -ENOMEM;
-
-	ttm_resource_init(bo, place, *res);
 
 	id = ida_alloc_max(&gman->gmr_ida, gman->max_gmr_ids - 1, GFP_KERNEL);
 	if (id < 0)
@@ -70,34 +64,36 @@ static int vmw_gmrid_man_get_node(struct ttm_resource_manager *man,
 	spin_lock(&gman->lock);
 
 	if (gman->max_gmr_pages > 0) {
-		gman->used_gmr_pages += (*res)->num_pages;
+		gman->used_gmr_pages += mem->num_pages;
 		if (unlikely(gman->used_gmr_pages > gman->max_gmr_pages))
 			goto nospace;
 	}
 
-	(*res)->start = id;
+	mem->mm_node = gman;
+	mem->start = id;
 
 	spin_unlock(&gman->lock);
 	return 0;
 
 nospace:
-	gman->used_gmr_pages -= (*res)->num_pages;
+	gman->used_gmr_pages -= mem->num_pages;
 	spin_unlock(&gman->lock);
 	ida_free(&gman->gmr_ida, id);
-	kfree(*res);
 	return -ENOSPC;
 }
 
 static void vmw_gmrid_man_put_node(struct ttm_resource_manager *man,
-				   struct ttm_resource *res)
+				   struct ttm_resource *mem)
 {
 	struct vmwgfx_gmrid_man *gman = to_gmrid_manager(man);
 
-	ida_free(&gman->gmr_ida, res->start);
-	spin_lock(&gman->lock);
-	gman->used_gmr_pages -= res->num_pages;
-	spin_unlock(&gman->lock);
-	kfree(res);
+	if (mem->mm_node) {
+		ida_free(&gman->gmr_ida, mem->start);
+		spin_lock(&gman->lock);
+		gman->used_gmr_pages -= mem->num_pages;
+		spin_unlock(&gman->lock);
+		mem->mm_node = NULL;
+	}
 }
 
 static const struct ttm_resource_manager_func vmw_gmrid_manager_func;

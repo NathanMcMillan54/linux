@@ -700,9 +700,7 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
 
-	ret = pm_runtime_resume_and_get(ctx->cal->dev);
-	if (ret < 0)
-		goto error_pipeline;
+	pm_runtime_get_sync(ctx->cal->dev);
 
 	cal_ctx_set_dma_addr(ctx, addr);
 	cal_ctx_start(ctx);

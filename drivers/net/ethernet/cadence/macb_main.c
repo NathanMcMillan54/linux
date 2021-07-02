@@ -4655,7 +4655,8 @@ static int macb_probe(struct platform_device *pdev)
 	struct macb *bp;
 	int err, val;
 
-	mem = devm_platform_get_and_ioremap_resource(pdev, 0, &regs);
+	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	mem = devm_ioremap_resource(&pdev->dev, regs);
 	if (IS_ERR(mem))
 		return PTR_ERR(mem);
 

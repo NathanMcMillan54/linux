@@ -480,7 +480,7 @@ prototypes::
 locking rules:
 
 ======================= ===================
-ops			open_mutex
+ops			bd_mutex
 ======================= ===================
 open:			yes
 release:		yes

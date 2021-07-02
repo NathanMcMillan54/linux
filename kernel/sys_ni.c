@@ -99,7 +99,7 @@ COND_SYSCALL(flock);
 
 /* fs/quota.c */
 COND_SYSCALL(quotactl);
-COND_SYSCALL(quotactl_fd);
+COND_SYSCALL(quotactl_path);
 
 /* fs/readdir.c */
 

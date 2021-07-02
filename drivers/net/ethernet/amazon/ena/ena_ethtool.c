@@ -233,13 +233,10 @@ int ena_get_sset_count(struct net_device *netdev, int sset)
 {
 	struct ena_adapter *adapter = netdev_priv(netdev);
 
-	switch (sset) {
-	case ETH_SS_STATS:
-		return ena_get_sw_stats_count(adapter) +
-		       ena_get_hw_stats_count(adapter);
-	}
+	if (sset != ETH_SS_STATS)
+		return -EOPNOTSUPP;
 
-	return -EOPNOTSUPP;
+	return ena_get_sw_stats_count(adapter) + ena_get_hw_stats_count(adapter);
 }
 
 static void ena_queue_strings(struct ena_adapter *adapter, u8 **data)
@@ -317,11 +314,10 @@ static void ena_get_ethtool_strings(struct net_device *netdev,
 {
 	struct ena_adapter *adapter = netdev_priv(netdev);
 
-	switch (sset) {
-	case ETH_SS_STATS:
-		ena_get_strings(adapter, data, adapter->eni_stats_supported);
-		break;
-	}
+	if (sset != ETH_SS_STATS)
+		return;
+
+	ena_get_strings(adapter, data, adapter->eni_stats_supported);
 }
 
 static int ena_get_link_ksettings(struct net_device *netdev,

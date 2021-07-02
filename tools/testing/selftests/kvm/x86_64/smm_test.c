@@ -55,8 +55,8 @@ static inline void sync_with_host(uint64_t phase)
 
 void self_smi(void)
 {
-	x2apic_write_reg(APIC_ICR,
-			 APIC_DEST_SELF | APIC_INT_ASSERT | APIC_DM_SMI);
+	wrmsr(APIC_BASE_MSR + (APIC_ICR >> 4),
+	      APIC_DEST_SELF | APIC_INT_ASSERT | APIC_DM_SMI);
 }
 
 void guest_code(void *arg)

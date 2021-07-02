@@ -4,10 +4,6 @@
 
 #include <asm/hvcall.h>
 
-#define RIC_FLUSH_TLB 0
-#define RIC_FLUSH_PWC 1
-#define RIC_FLUSH_ALL 2
-
 struct vm_area_struct;
 struct mm_struct;
 struct mmu_gather;

@@ -173,15 +173,14 @@ static int cio2_bridge_connect_sensor(const struct cio2_sensor_config *cfg,
 	int ret;
 
 	for_each_acpi_dev_match(adev, cfg->hid, NULL, -1) {
-		if (!adev->status.enabled) {
-			acpi_dev_put(adev);
+		if (!adev->status.enabled)
 			continue;
-		}
 
 		if (bridge->n_sensors >= CIO2_NUM_PORTS) {
-			acpi_dev_put(adev);
 			dev_err(&cio2->dev, "Exceeded available CIO2 ports\n");
-			return -EINVAL;
+			cio2_bridge_unregister_sensors(bridge);
+			ret = -EINVAL;
+			goto err_out;
 		}
 
 		sensor = &bridge->sensors[bridge->n_sensors];
@@ -229,6 +228,7 @@ err_free_swnodes:
 	software_node_unregister_nodes(sensor->swnodes);
 err_put_adev:
 	acpi_dev_put(sensor->adev);
+err_out:
 	return ret;
 }
 

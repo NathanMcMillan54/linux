@@ -102,7 +102,6 @@ struct msm_dsi_host {
 	int id;
 
 	void __iomem *ctrl_base;
-	phys_addr_t ctrl_size;
 	struct regulator_bulk_data supplies[DSI_DEV_REGULATOR_MAX];
 
 	struct clk *bus_clks[DSI_BUS_CLK_MAX];
@@ -113,6 +112,8 @@ struct msm_dsi_host {
 	struct clk *byte_clk_src;
 	struct clk *pixel_clk_src;
 	struct clk *byte_intf_clk;
+
+	struct opp_table *opp_table;
 
 	u32 byte_clk_rate;
 	u32 pixel_clk_rate;
@@ -1091,7 +1092,7 @@ int dsi_tx_buf_alloc_6g(struct msm_dsi_host *msm_host, int size)
 	uint64_t iova;
 	u8 *data;
 
-	data = msm_gem_kernel_new(dev, size, MSM_BO_WC,
+	data = msm_gem_kernel_new(dev, size, MSM_BO_UNCACHED,
 					priv->kms->aspace,
 					&msm_host->tx_gem_obj, &iova);
 
@@ -1838,7 +1839,7 @@ int msm_dsi_host_init(struct msm_dsi *msm_dsi)
 		goto fail;
 	}
 
-	msm_host->ctrl_base = msm_ioremap_size(pdev, "dsi_ctrl", "DSI CTRL", &msm_host->ctrl_size);
+	msm_host->ctrl_base = msm_ioremap(pdev, "dsi_ctrl", "DSI CTRL");
 	if (IS_ERR(msm_host->ctrl_base)) {
 		pr_err("%s: unable to map Dsi ctrl base\n", __func__);
 		ret = PTR_ERR(msm_host->ctrl_base);
@@ -1883,13 +1884,14 @@ int msm_dsi_host_init(struct msm_dsi *msm_dsi)
 		goto fail;
 	}
 
-	ret = devm_pm_opp_set_clkname(&pdev->dev, "byte");
-	if (ret)
-		return ret;
+	msm_host->opp_table = dev_pm_opp_set_clkname(&pdev->dev, "byte");
+	if (IS_ERR(msm_host->opp_table))
+		return PTR_ERR(msm_host->opp_table);
 	/* OPP table is optional */
-	ret = devm_pm_opp_of_add_table(&pdev->dev);
+	ret = dev_pm_opp_of_add_table(&pdev->dev);
 	if (ret && ret != -ENODEV) {
 		dev_err(&pdev->dev, "invalid OPP table in device tree\n");
+		dev_pm_opp_put_clkname(msm_host->opp_table);
 		return ret;
 	}
 
@@ -1928,6 +1930,8 @@ void msm_dsi_host_destroy(struct mipi_dsi_host *host)
 	mutex_destroy(&msm_host->cmd_mutex);
 	mutex_destroy(&msm_host->dev_mutex);
 
+	dev_pm_opp_of_remove_table(&msm_host->pdev->dev);
+	dev_pm_opp_put_clkname(msm_host->opp_table);
 	pm_runtime_disable(&msm_host->pdev->dev);
 }
 
@@ -2482,16 +2486,4 @@ struct drm_bridge *msm_dsi_host_get_bridge(struct mipi_dsi_host *host)
 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
 
 	return of_drm_find_bridge(msm_host->device_node);
-}
-
-void msm_dsi_host_snapshot(struct msm_disp_state *disp_state, struct mipi_dsi_host *host)
-{
-	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
-
-	pm_runtime_get_sync(&msm_host->pdev->dev);
-
-	msm_disp_snapshot_add_block(disp_state, msm_host->ctrl_size,
-			msm_host->ctrl_base, "dsi%d_ctrl", msm_host->id);
-
-	pm_runtime_put_sync(&msm_host->pdev->dev);
 }

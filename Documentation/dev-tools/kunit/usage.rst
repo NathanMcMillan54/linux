@@ -10,7 +10,7 @@ understand it. This guide assumes a working knowledge of the Linux kernel and
 some basic knowledge of testing.
 
 For a high level introduction to KUnit, including setting up KUnit for your
-project, see Documentation/dev-tools/kunit/start.rst.
+project, see :doc:`start`.
 
 Organization of this document
 =============================
@@ -99,8 +99,7 @@ violated; however, the test will continue running, potentially trying other
 expectations until the test case ends or is otherwise terminated. This is as
 opposed to *assertions* which are discussed later.
 
-To learn about more expectations supported by KUnit, see
-Documentation/dev-tools/kunit/api/test.rst.
+To learn about more expectations supported by KUnit, see :doc:`api/test`.
 
 .. note::
    A single test case should be pretty short, pretty easy to understand,
@@ -217,8 +216,7 @@ test suite in a special linker section so that it can be run by KUnit either
 after late_init, or when the test module is loaded (depending on whether the
 test was built in or not).
 
-For more information on these types of things see the
-Documentation/dev-tools/kunit/api/test.rst.
+For more information on these types of things see the :doc:`api/test`.
 
 Common Patterns
 ===============

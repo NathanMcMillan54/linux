@@ -248,7 +248,7 @@ static int allocate_vmid(struct device_queue_manager *dqm,
 			qpd->vmid,
 			qpd->page_table_base);
 	/* invalidate the VM context after pasid and vmid mapping is set up */
-	kfd_flush_tlb(qpd_to_pdd(qpd), TLB_FLUSH_LEGACY);
+	kfd_flush_tlb(qpd_to_pdd(qpd));
 
 	if (dqm->dev->kfd2kgd->set_scratch_backing_va)
 		dqm->dev->kfd2kgd->set_scratch_backing_va(dqm->dev->kgd,
@@ -284,7 +284,7 @@ static void deallocate_vmid(struct device_queue_manager *dqm,
 		if (flush_texture_cache_nocpsch(q->device, qpd))
 			pr_err("Failed to flush TC\n");
 
-	kfd_flush_tlb(qpd_to_pdd(qpd), TLB_FLUSH_LEGACY);
+	kfd_flush_tlb(qpd_to_pdd(qpd));
 
 	/* Release the vmid mapping */
 	set_pasid_vmid_mapping(dqm, 0, qpd->vmid);
@@ -486,6 +486,9 @@ static int destroy_queue_nocpsch_locked(struct device_queue_manager *dqm,
 	if (retval == -ETIME)
 		qpd->reset_wavefronts = true;
 
+
+	mqd_mgr->free_mqd(mqd_mgr, q->mqd, q->mqd_mem_obj);
+
 	list_del(&q->list);
 	if (list_empty(&qpd->queues_list)) {
 		if (qpd->reset_wavefronts) {
@@ -520,8 +523,6 @@ static int destroy_queue_nocpsch(struct device_queue_manager *dqm,
 	int retval;
 	uint64_t sdma_val = 0;
 	struct kfd_process_device *pdd = qpd_to_pdd(qpd);
-	struct mqd_manager *mqd_mgr =
-		dqm->mqd_mgrs[get_mqd_type_from_queue_type(q->properties.type)];
 
 	/* Get the SDMA queue stats */
 	if ((q->properties.type == KFD_QUEUE_TYPE_SDMA) ||
@@ -538,8 +539,6 @@ static int destroy_queue_nocpsch(struct device_queue_manager *dqm,
 	if (!retval)
 		pdd->sdma_past_activity_counter += sdma_val;
 	dqm_unlock(dqm);
-
-	mqd_mgr->free_mqd(mqd_mgr, q->mqd, q->mqd_mem_obj);
 
 	return retval;
 }
@@ -739,7 +738,7 @@ static int restore_process_queues_nocpsch(struct device_queue_manager *dqm,
 
 	pdd = qpd_to_pdd(qpd);
 	/* Retrieve PD base */
-	pd_base = amdgpu_amdkfd_gpuvm_get_process_page_dir(pdd->drm_priv);
+	pd_base = amdgpu_amdkfd_gpuvm_get_process_page_dir(pdd->vm);
 
 	dqm_lock(dqm);
 	if (WARN_ON_ONCE(!qpd->evicted)) /* already restored, do nothing */
@@ -761,7 +760,7 @@ static int restore_process_queues_nocpsch(struct device_queue_manager *dqm,
 				dqm->dev->kgd,
 				qpd->vmid,
 				qpd->page_table_base);
-		kfd_flush_tlb(pdd, TLB_FLUSH_LEGACY);
+		kfd_flush_tlb(pdd);
 	}
 
 	/* Take a safe reference to the mm_struct, which may otherwise
@@ -822,7 +821,7 @@ static int restore_process_queues_cpsch(struct device_queue_manager *dqm,
 
 	pdd = qpd_to_pdd(qpd);
 	/* Retrieve PD base */
-	pd_base = amdgpu_amdkfd_gpuvm_get_process_page_dir(pdd->drm_priv);
+	pd_base = amdgpu_amdkfd_gpuvm_get_process_page_dir(pdd->vm);
 
 	dqm_lock(dqm);
 	if (WARN_ON_ONCE(!qpd->evicted)) /* already restored, do nothing */
@@ -874,7 +873,7 @@ static int register_process(struct device_queue_manager *dqm,
 
 	pdd = qpd_to_pdd(qpd);
 	/* Retrieve PD base */
-	pd_base = amdgpu_amdkfd_gpuvm_get_process_page_dir(pdd->drm_priv);
+	pd_base = amdgpu_amdkfd_gpuvm_get_process_page_dir(pdd->vm);
 
 	dqm_lock(dqm);
 	list_add(&n->list, &dqm->queues);
@@ -1630,7 +1629,7 @@ out:
 static int process_termination_nocpsch(struct device_queue_manager *dqm,
 		struct qcm_process_device *qpd)
 {
-	struct queue *q;
+	struct queue *q, *next;
 	struct device_process_node *cur, *next_dpn;
 	int retval = 0;
 	bool found = false;
@@ -1638,19 +1637,12 @@ static int process_termination_nocpsch(struct device_queue_manager *dqm,
 	dqm_lock(dqm);
 
 	/* Clear all user mode queues */
-	while (!list_empty(&qpd->queues_list)) {
-		struct mqd_manager *mqd_mgr;
+	list_for_each_entry_safe(q, next, &qpd->queues_list, list) {
 		int ret;
 
-		q = list_first_entry(&qpd->queues_list, struct queue, list);
-		mqd_mgr = dqm->mqd_mgrs[get_mqd_type_from_queue_type(
-				q->properties.type)];
 		ret = destroy_queue_nocpsch_locked(dqm, qpd, q);
 		if (ret)
 			retval = ret;
-		dqm_unlock(dqm);
-		mqd_mgr->free_mqd(mqd_mgr, q->mqd, q->mqd_mem_obj);
-		dqm_lock(dqm);
 	}
 
 	/* Unregister process */
@@ -1682,34 +1674,36 @@ static int get_wave_state(struct device_queue_manager *dqm,
 			  u32 *save_area_used_size)
 {
 	struct mqd_manager *mqd_mgr;
+	int r;
 
 	dqm_lock(dqm);
 
-	mqd_mgr = dqm->mqd_mgrs[KFD_MQD_TYPE_CP];
-
 	if (q->properties.type != KFD_QUEUE_TYPE_COMPUTE ||
-	    q->properties.is_active || !q->device->cwsr_enabled ||
-	    !mqd_mgr->get_wave_state) {
-		dqm_unlock(dqm);
-		return -EINVAL;
+	    q->properties.is_active || !q->device->cwsr_enabled) {
+		r = -EINVAL;
+		goto dqm_unlock;
 	}
 
-	dqm_unlock(dqm);
+	mqd_mgr = dqm->mqd_mgrs[KFD_MQD_TYPE_CP];
 
-	/*
-	 * get_wave_state is outside the dqm lock to prevent circular locking
-	 * and the queue should be protected against destruction by the process
-	 * lock.
-	 */
-	return mqd_mgr->get_wave_state(mqd_mgr, q->mqd, ctl_stack,
+	if (!mqd_mgr->get_wave_state) {
+		r = -EINVAL;
+		goto dqm_unlock;
+	}
+
+	r = mqd_mgr->get_wave_state(mqd_mgr, q->mqd, ctl_stack,
 			ctl_stack_used_size, save_area_used_size);
+
+dqm_unlock:
+	dqm_unlock(dqm);
+	return r;
 }
 
 static int process_termination_cpsch(struct device_queue_manager *dqm,
 		struct qcm_process_device *qpd)
 {
 	int retval;
-	struct queue *q;
+	struct queue *q, *next;
 	struct kernel_queue *kq, *kq_next;
 	struct mqd_manager *mqd_mgr;
 	struct device_process_node *cur, *next_dpn;
@@ -1766,19 +1760,6 @@ static int process_termination_cpsch(struct device_queue_manager *dqm,
 		qpd->reset_wavefronts = false;
 	}
 
-	/* Lastly, free mqd resources.
-	 * Do free_mqd() after dqm_unlock to avoid circular locking.
-	 */
-	while (!list_empty(&qpd->queues_list)) {
-		q = list_first_entry(&qpd->queues_list, struct queue, list);
-		mqd_mgr = dqm->mqd_mgrs[get_mqd_type_from_queue_type(
-				q->properties.type)];
-		list_del(&q->list);
-		qpd->queue_count--;
-		dqm_unlock(dqm);
-		mqd_mgr->free_mqd(mqd_mgr, q->mqd, q->mqd_mem_obj);
-		dqm_lock(dqm);
-	}
 	dqm_unlock(dqm);
 
 	/* Outside the DQM lock because under the DQM lock we can't do
@@ -1786,6 +1767,17 @@ static int process_termination_cpsch(struct device_queue_manager *dqm,
 	 */
 	if (found)
 		kfd_dec_compute_active(dqm->dev);
+
+	/* Lastly, free mqd resources.
+	 * Do free_mqd() after dqm_unlock to avoid circular locking.
+	 */
+	list_for_each_entry_safe(q, next, &qpd->queues_list, list) {
+		mqd_mgr = dqm->mqd_mgrs[get_mqd_type_from_queue_type(
+				q->properties.type)];
+		list_del(&q->list);
+		qpd->queue_count--;
+		mqd_mgr->free_mqd(mqd_mgr, q->mqd, q->mqd_mem_obj);
+	}
 
 	return retval;
 }
@@ -1944,8 +1936,6 @@ struct device_queue_manager *device_queue_manager_init(struct kfd_dev *dev)
 	case CHIP_NAVY_FLOUNDER:
 	case CHIP_VANGOGH:
 	case CHIP_DIMGREY_CAVEFISH:
-	case CHIP_BEIGE_GOBY:
-	case CHIP_YELLOW_CARP:
 		device_queue_manager_init_v10_navi10(&dqm->asic_ops);
 		break;
 	default:

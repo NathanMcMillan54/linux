@@ -946,8 +946,8 @@ int intel_engine_init_cmd_parser(struct intel_engine_cs *engine)
 	int cmd_table_count;
 	int ret;
 
-	if (GRAPHICS_VER(engine->i915) != 7 && !(GRAPHICS_VER(engine->i915) == 9 &&
-						 engine->class == COPY_ENGINE_CLASS))
+	if (!IS_GEN(engine->i915, 7) && !(IS_GEN(engine->i915, 9) &&
+					  engine->class == COPY_ENGINE_CLASS))
 		return 0;
 
 	switch (engine->class) {
@@ -977,7 +977,7 @@ int intel_engine_init_cmd_parser(struct intel_engine_cs *engine)
 		break;
 	case COPY_ENGINE_CLASS:
 		engine->get_cmd_length_mask = gen7_blt_get_cmd_length_mask;
-		if (GRAPHICS_VER(engine->i915) == 9) {
+		if (IS_GEN(engine->i915, 9)) {
 			cmd_tables = gen9_blt_cmd_table;
 			cmd_table_count = ARRAY_SIZE(gen9_blt_cmd_table);
 			engine->get_cmd_length_mask =
@@ -993,7 +993,7 @@ int intel_engine_init_cmd_parser(struct intel_engine_cs *engine)
 			cmd_table_count = ARRAY_SIZE(gen7_blt_cmd_table);
 		}
 
-		if (GRAPHICS_VER(engine->i915) == 9) {
+		if (IS_GEN(engine->i915, 9)) {
 			engine->reg_tables = gen9_blt_reg_tables;
 			engine->reg_table_count =
 				ARRAY_SIZE(gen9_blt_reg_tables);
@@ -1369,20 +1369,6 @@ static int check_bbstart(u32 *cmd, u32 offset, u32 length,
 	return 0;
 }
 
-/**
- * intel_engine_cmd_parser_alloc_jump_whitelist() - preallocate jump whitelist for intel_engine_cmd_parser()
- * @batch_length: length of the commands in batch_obj
- * @trampoline: Whether jump trampolines are used.
- *
- * Preallocates a jump whitelist for parsing the cmd buffer in intel_engine_cmd_parser().
- * This has to be preallocated, because the command parser runs in signaling context,
- * and may not allocate any memory.
- *
- * Return: NULL or pointer to a jump whitelist, or ERR_PTR() on failure. Use
- * IS_ERR() to check for errors. Must bre freed() with kfree().
- *
- * NULL is a valid value, meaning no allocation was required.
- */
 unsigned long *intel_engine_cmd_parser_alloc_jump_whitelist(u32 batch_length,
 							    bool trampoline)
 {
@@ -1415,9 +1401,7 @@ unsigned long *intel_engine_cmd_parser_alloc_jump_whitelist(u32 batch_length,
  * @batch_offset: byte offset in the batch at which execution starts
  * @batch_length: length of the commands in batch_obj
  * @shadow: validated copy of the batch buffer in question
- * @jump_whitelist: buffer preallocated with intel_engine_cmd_parser_alloc_jump_whitelist()
- * @shadow_map: mapping to @shadow vma
- * @batch_map: mapping to @batch vma
+ * @trampoline: whether to emit a conditional trampoline at the end of the batch
  *
  * Parses the specified batch buffer looking for privilege violations as
  * described in the overview.
@@ -1537,7 +1521,7 @@ int intel_engine_cmd_parser(struct intel_engine_cs *engine,
 				if (IS_HASWELL(engine->i915))
 					flags = MI_BATCH_NON_SECURE_HSW;
 
-				GEM_BUG_ON(!IS_GRAPHICS_VER(engine->i915, 6, 7));
+				GEM_BUG_ON(!IS_GEN_RANGE(engine->i915, 6, 7));
 				__gen6_emit_bb_start(batch_end,
 						     batch_addr,
 						     flags);

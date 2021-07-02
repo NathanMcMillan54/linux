@@ -32,7 +32,6 @@
 #include <linux/dma-buf.h>
 
 #include <drm/amdgpu_drm.h>
-#include <drm/drm_drv.h>
 #include <drm/drm_gem_ttm_helper.h>
 
 #include "amdgpu.h"
@@ -41,46 +40,6 @@
 #include "amdgpu_xgmi.h"
 
 static const struct drm_gem_object_funcs amdgpu_gem_object_funcs;
-
-static vm_fault_t amdgpu_gem_fault(struct vm_fault *vmf)
-{
-	struct ttm_buffer_object *bo = vmf->vma->vm_private_data;
-	struct drm_device *ddev = bo->base.dev;
-	vm_fault_t ret;
-	int idx;
-
-	ret = ttm_bo_vm_reserve(bo, vmf);
-	if (ret)
-		return ret;
-
-	if (drm_dev_enter(ddev, &idx)) {
-		ret = amdgpu_bo_fault_reserve_notify(bo);
-		if (ret) {
-			drm_dev_exit(idx);
-			goto unlock;
-		}
-
-		 ret = ttm_bo_vm_fault_reserved(vmf, vmf->vma->vm_page_prot,
-						TTM_BO_VM_NUM_PREFAULT, 1);
-
-		 drm_dev_exit(idx);
-	} else {
-		ret = ttm_bo_vm_dummy_page(vmf, vmf->vma->vm_page_prot);
-	}
-	if (ret == VM_FAULT_RETRY && !(vmf->flags & FAULT_FLAG_RETRY_NOWAIT))
-		return ret;
-
-unlock:
-	dma_resv_unlock(bo->base.resv);
-	return ret;
-}
-
-static const struct vm_operations_struct amdgpu_gem_vm_ops = {
-	.fault = amdgpu_gem_fault,
-	.open = ttm_bo_vm_open,
-	.close = ttm_bo_vm_close,
-	.access = ttm_bo_vm_access
-};
 
 static void amdgpu_gem_object_free(struct drm_gem_object *gobj)
 {
@@ -170,7 +129,7 @@ static int amdgpu_gem_object_open(struct drm_gem_object *obj,
 		return -EPERM;
 
 	if (abo->flags & AMDGPU_GEM_CREATE_VM_ALWAYS_VALID &&
-	    abo->tbo.base.resv != vm->root.bo->tbo.base.resv)
+	    abo->tbo.base.resv != vm->root.base.bo->tbo.base.resv)
 		return -EPERM;
 
 	r = amdgpu_bo_reserve(abo, false);
@@ -226,7 +185,7 @@ static void amdgpu_gem_object_close(struct drm_gem_object *obj,
 	if (!amdgpu_vm_ready(vm))
 		goto out_unlock;
 
-	fence = dma_resv_excl_fence(bo->tbo.base.resv);
+	fence = dma_resv_get_excl(bo->tbo.base.resv);
 	if (fence) {
 		amdgpu_bo_fence(bo, fence, true);
 		fence = NULL;
@@ -246,18 +205,6 @@ out_unlock:
 	ttm_eu_backoff_reservation(&ticket, &list);
 }
 
-static int amdgpu_gem_object_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma)
-{
-	struct amdgpu_bo *bo = gem_to_amdgpu_bo(obj);
-
-	if (amdgpu_ttm_tt_get_usermm(bo->tbo.ttm))
-		return -EPERM;
-	if (bo->flags & AMDGPU_GEM_CREATE_NO_CPU_ACCESS)
-		return -EPERM;
-
-	return drm_gem_ttm_mmap(obj, vma);
-}
-
 static const struct drm_gem_object_funcs amdgpu_gem_object_funcs = {
 	.free = amdgpu_gem_object_free,
 	.open = amdgpu_gem_object_open,
@@ -265,8 +212,6 @@ static const struct drm_gem_object_funcs amdgpu_gem_object_funcs = {
 	.export = amdgpu_gem_prime_export,
 	.vmap = drm_gem_ttm_vmap,
 	.vunmap = drm_gem_ttm_vunmap,
-	.mmap = amdgpu_gem_object_mmap,
-	.vm_ops = &amdgpu_gem_vm_ops,
 };
 
 /*
@@ -320,11 +265,11 @@ int amdgpu_gem_create_ioctl(struct drm_device *dev, void *data,
 	}
 
 	if (flags & AMDGPU_GEM_CREATE_VM_ALWAYS_VALID) {
-		r = amdgpu_bo_reserve(vm->root.bo, false);
+		r = amdgpu_bo_reserve(vm->root.base.bo, false);
 		if (r)
 			return r;
 
-		resv = vm->root.bo->tbo.base.resv;
+		resv = vm->root.base.bo->tbo.base.resv;
 	}
 
 	initial_domain = (u32)(0xffffffff & args->in.domains);
@@ -353,9 +298,9 @@ retry:
 		if (!r) {
 			struct amdgpu_bo *abo = gem_to_amdgpu_bo(gobj);
 
-			abo->parent = amdgpu_bo_ref(vm->root.bo);
+			abo->parent = amdgpu_bo_ref(vm->root.base.bo);
 		}
-		amdgpu_bo_unreserve(vm->root.bo);
+		amdgpu_bo_unreserve(vm->root.base.bo);
 	}
 	if (r)
 		return r;
@@ -526,7 +471,8 @@ int amdgpu_gem_wait_idle_ioctl(struct drm_device *dev, void *data,
 		return -ENOENT;
 	}
 	robj = gem_to_amdgpu_bo(gobj);
-	ret = dma_resv_wait_timeout(robj->tbo.base.resv, true, true, timeout);
+	ret = dma_resv_wait_timeout_rcu(robj->tbo.base.resv, true, true,
+						  timeout);
 
 	/* ret == 0 means not signaled,
 	 * ret > 0 means signaled
@@ -612,7 +558,7 @@ static void amdgpu_gem_va_update_vm(struct amdgpu_device *adev,
 
 	if (operation == AMDGPU_VA_OP_MAP ||
 	    operation == AMDGPU_VA_OP_REPLACE) {
-		r = amdgpu_vm_bo_update(adev, bo_va, false, NULL);
+		r = amdgpu_vm_bo_update(adev, bo_va, false);
 		if (r)
 			goto error;
 	}
@@ -820,7 +766,7 @@ int amdgpu_gem_op_ioctl(struct drm_device *dev, void *data,
 		void __user *out = u64_to_user_ptr(args->value);
 
 		info.bo_size = robj->tbo.base.size;
-		info.alignment = robj->tbo.page_alignment << PAGE_SHIFT;
+		info.alignment = robj->tbo.mem.page_alignment << PAGE_SHIFT;
 		info.domains = robj->preferred_domains;
 		info.domain_flags = robj->flags;
 		amdgpu_bo_unreserve(robj);
@@ -841,7 +787,7 @@ int amdgpu_gem_op_ioctl(struct drm_device *dev, void *data,
 		}
 		for (base = robj->vm_bo; base; base = base->next)
 			if (amdgpu_xgmi_same_hive(amdgpu_ttm_adev(robj->tbo.bdev),
-				amdgpu_ttm_adev(base->vm->root.bo->tbo.bdev))) {
+				amdgpu_ttm_adev(base->vm->root.base.bo->tbo.bdev))) {
 				r = -EINVAL;
 				amdgpu_bo_unreserve(robj);
 				goto out;

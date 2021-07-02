@@ -56,7 +56,8 @@ static const struct dsa_device_ops xrs700x_netdev_ops = {
 	.proto	= DSA_TAG_PROTO_XRS700X,
 	.xmit	= xrs700x_xmit,
 	.rcv	= xrs700x_rcv,
-	.needed_tailroom = 1,
+	.overhead = 1,
+	.tail_tag = true,
 };
 
 MODULE_LICENSE("GPL");

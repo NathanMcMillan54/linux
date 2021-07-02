@@ -1528,7 +1528,7 @@ static int ctnetlink_del_conntrack(struct sk_buff *skb,
 				   const struct nfnl_info *info,
 				   const struct nlattr * const cda[])
 {
-	u8 family = info->nfmsg->nfgen_family;
+	struct nfgenmsg *nfmsg = nlmsg_data(info->nlh);
 	struct nf_conntrack_tuple_hash *h;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_zone zone;
@@ -1541,12 +1541,12 @@ static int ctnetlink_del_conntrack(struct sk_buff *skb,
 
 	if (cda[CTA_TUPLE_ORIG])
 		err = ctnetlink_parse_tuple(cda, &tuple, CTA_TUPLE_ORIG,
-					    family, &zone);
+					    nfmsg->nfgen_family, &zone);
 	else if (cda[CTA_TUPLE_REPLY])
 		err = ctnetlink_parse_tuple(cda, &tuple, CTA_TUPLE_REPLY,
-					    family, &zone);
+					    nfmsg->nfgen_family, &zone);
 	else {
-		u_int8_t u3 = info->nfmsg->version ? family : AF_UNSPEC;
+		u_int8_t u3 = nfmsg->version ? nfmsg->nfgen_family : AF_UNSPEC;
 
 		return ctnetlink_flush_conntrack(info->net, cda,
 						 NETLINK_CB(skb).portid,
@@ -1586,7 +1586,8 @@ static int ctnetlink_get_conntrack(struct sk_buff *skb,
 				   const struct nfnl_info *info,
 				   const struct nlattr * const cda[])
 {
-	u_int8_t u3 = info->nfmsg->nfgen_family;
+	struct nfgenmsg *nfmsg = nlmsg_data(info->nlh);
+	u_int8_t u3 = nfmsg->nfgen_family;
 	struct nf_conntrack_tuple_hash *h;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_zone zone;
@@ -1627,8 +1628,9 @@ static int ctnetlink_get_conntrack(struct sk_buff *skb,
 
 	ct = nf_ct_tuplehash_to_ctrack(h);
 
+	err = -ENOMEM;
 	skb2 = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-	if (!skb2) {
+	if (skb2 == NULL) {
 		nf_ct_put(ct);
 		return -ENOMEM;
 	}
@@ -1638,12 +1640,21 @@ static int ctnetlink_get_conntrack(struct sk_buff *skb,
 				  NFNL_MSG_TYPE(info->nlh->nlmsg_type), ct,
 				  true, 0);
 	nf_ct_put(ct);
-	if (err <= 0) {
-		kfree_skb(skb2);
-		return -ENOMEM;
-	}
+	if (err <= 0)
+		goto free;
 
-	return nfnetlink_unicast(skb2, info->net, NETLINK_CB(skb).portid);
+	err = netlink_unicast(info->sk, skb2, NETLINK_CB(skb).portid,
+			      MSG_DONTWAIT);
+	if (err < 0)
+		goto out;
+
+	return 0;
+
+free:
+	kfree_skb(skb2);
+out:
+	/* this avoids a loop in nfnetlink. */
+	return err == -EAGAIN ? -ENOBUFS : err;
 }
 
 static int ctnetlink_done_list(struct netlink_callback *cb)
@@ -2362,9 +2373,10 @@ static int ctnetlink_new_conntrack(struct sk_buff *skb,
 				   const struct nfnl_info *info,
 				   const struct nlattr * const cda[])
 {
+	struct nfgenmsg *nfmsg = nlmsg_data(info->nlh);
 	struct nf_conntrack_tuple otuple, rtuple;
 	struct nf_conntrack_tuple_hash *h = NULL;
-	u_int8_t u3 = info->nfmsg->nfgen_family;
+	u_int8_t u3 = nfmsg->nfgen_family;
 	struct nf_conntrack_zone zone;
 	struct nf_conn *ct;
 	int err;
@@ -2578,12 +2590,21 @@ static int ctnetlink_stat_ct(struct sk_buff *skb, const struct nfnl_info *info,
 					  info->nlh->nlmsg_seq,
 					  NFNL_MSG_TYPE(info->nlh->nlmsg_type),
 					  sock_net(skb->sk));
-	if (err <= 0) {
-		kfree_skb(skb2);
-		return -ENOMEM;
-	}
+	if (err <= 0)
+		goto free;
 
-	return nfnetlink_unicast(skb2, info->net, NETLINK_CB(skb).portid);
+	err = netlink_unicast(info->sk, skb2, NETLINK_CB(skb).portid,
+			      MSG_DONTWAIT);
+	if (err < 0)
+		goto out;
+
+	return 0;
+
+free:
+	kfree_skb(skb2);
+out:
+	/* this avoids a loop in nfnetlink. */
+	return err == -EAGAIN ? -ENOBUFS : err;
 }
 
 static const struct nla_policy exp_nla_policy[CTA_EXPECT_MAX+1] = {
@@ -3257,7 +3278,8 @@ static int ctnetlink_get_expect(struct sk_buff *skb,
 				const struct nfnl_info *info,
 				const struct nlattr * const cda[])
 {
-	u_int8_t u3 = info->nfmsg->nfgen_family;
+	struct nfgenmsg *nfmsg = nlmsg_data(info->nlh);
+	u_int8_t u3 = nfmsg->nfgen_family;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_expect *exp;
 	struct nf_conntrack_zone zone;
@@ -3307,10 +3329,11 @@ static int ctnetlink_get_expect(struct sk_buff *skb,
 		}
 	}
 
+	err = -ENOMEM;
 	skb2 = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-	if (!skb2) {
+	if (skb2 == NULL) {
 		nf_ct_expect_put(exp);
-		return -ENOMEM;
+		goto out;
 	}
 
 	rcu_read_lock();
@@ -3319,12 +3342,21 @@ static int ctnetlink_get_expect(struct sk_buff *skb,
 				      exp);
 	rcu_read_unlock();
 	nf_ct_expect_put(exp);
-	if (err <= 0) {
-		kfree_skb(skb2);
-		return -ENOMEM;
-	}
+	if (err <= 0)
+		goto free;
 
-	return nfnetlink_unicast(skb2, info->net, NETLINK_CB(skb).portid);
+	err = netlink_unicast(info->sk, skb2, NETLINK_CB(skb).portid,
+			      MSG_DONTWAIT);
+	if (err < 0)
+		goto out;
+
+	return 0;
+
+free:
+	kfree_skb(skb2);
+out:
+	/* this avoids a loop in nfnetlink. */
+	return err == -EAGAIN ? -ENOBUFS : err;
 }
 
 static bool expect_iter_name(struct nf_conntrack_expect *exp, void *data)
@@ -3346,7 +3378,8 @@ static int ctnetlink_del_expect(struct sk_buff *skb,
 				const struct nfnl_info *info,
 				const struct nlattr * const cda[])
 {
-	u_int8_t u3 = info->nfmsg->nfgen_family;
+	struct nfgenmsg *nfmsg = nlmsg_data(info->nlh);
+	u_int8_t u3 = nfmsg->nfgen_family;
 	struct nf_conntrack_expect *exp;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_zone zone;
@@ -3597,7 +3630,8 @@ static int ctnetlink_new_expect(struct sk_buff *skb,
 				const struct nfnl_info *info,
 				const struct nlattr * const cda[])
 {
-	u_int8_t u3 = info->nfmsg->nfgen_family;
+	struct nfgenmsg *nfmsg = nlmsg_data(info->nlh);
+	u_int8_t u3 = nfmsg->nfgen_family;
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_expect *exp;
 	struct nf_conntrack_zone zone;

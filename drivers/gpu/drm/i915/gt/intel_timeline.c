@@ -32,6 +32,7 @@ static struct i915_vma *hwsp_alloc(struct intel_gt *gt)
 	return vma;
 }
 
+__i915_active_call
 static void __timeline_retire(struct i915_active *active)
 {
 	struct intel_timeline *tl =
@@ -103,8 +104,7 @@ static int intel_timeline_init(struct intel_timeline *timeline,
 	INIT_LIST_HEAD(&timeline->requests);
 
 	i915_syncmap_init(&timeline->sync);
-	i915_active_init(&timeline->active, __timeline_active,
-			 __timeline_retire, 0);
+	i915_active_init(&timeline->active, __timeline_active, __timeline_retire);
 
 	return 0;
 }

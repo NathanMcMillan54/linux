@@ -515,9 +515,8 @@ kunit_find_resource(struct kunit *test,
 		    void *match_data)
 {
 	struct kunit_resource *res, *found = NULL;
-	unsigned long flags;
 
-	spin_lock_irqsave(&test->lock, flags);
+	spin_lock(&test->lock);
 
 	list_for_each_entry_reverse(res, &test->resources, node) {
 		if (match(test, res, (void *)match_data)) {
@@ -527,7 +526,7 @@ kunit_find_resource(struct kunit *test,
 		}
 	}
 
-	spin_unlock_irqrestore(&test->lock, flags);
+	spin_unlock(&test->lock);
 
 	return found;
 }

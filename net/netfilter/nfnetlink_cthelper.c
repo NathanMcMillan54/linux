@@ -667,10 +667,14 @@ static int nfnl_cthelper_get(struct sk_buff *skb, const struct nfnl_info *info,
 			break;
 		}
 
-		ret = nfnetlink_unicast(skb2, info->net, NETLINK_CB(skb).portid);
-		break;
-	}
+		ret = netlink_unicast(info->sk, skb2, NETLINK_CB(skb).portid,
+				      MSG_DONTWAIT);
+		if (ret > 0)
+			ret = 0;
 
+		/* this avoids a loop in nfnetlink. */
+		return ret == -EAGAIN ? -ENOBUFS : ret;
+	}
 	return ret;
 }
 

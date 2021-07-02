@@ -20,7 +20,6 @@
 #include <linux/irq_work.h>
 #include <linux/workqueue.h>
 #include <linux/ctype.h>
-#include <linux/once_lite.h>
 
 #ifdef CONFIG_FTRACE_SYSCALLS
 #include <asm/unistd.h>		/* For NR_SYSCALLS	     */
@@ -100,8 +99,16 @@ enum trace_type {
 #include "trace_entries.h"
 
 /* Use this for memory failure errors */
-#define MEM_FAIL(condition, fmt, ...)					\
-	DO_ONCE_LITE_IF(condition, pr_err, "ERROR: " fmt, ##__VA_ARGS__)
+#define MEM_FAIL(condition, fmt, ...) ({			\
+	static bool __section(".data.once") __warned;		\
+	int __ret_warn_once = !!(condition);			\
+								\
+	if (unlikely(__ret_warn_once && !__warned)) {		\
+		__warned = true;				\
+		pr_err("ERROR: " fmt, ##__VA_ARGS__);		\
+	}							\
+	unlikely(__ret_warn_once);				\
+})
 
 /*
  * syscalls are special, and need special handling, this is why

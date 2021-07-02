@@ -361,12 +361,6 @@ struct dm_target {
 	 * Set if we need to limit the number of in-flight bios when swapping.
 	 */
 	bool limit_swap_bios:1;
-
-	/*
-	 * Set if this target implements a a zoned device and needs emulation of
-	 * zone append operations using regular writes.
-	 */
-	bool emulate_zone_append:1;
 };
 
 void *dm_per_bio_data(struct bio *bio, size_t data_size);
@@ -484,8 +478,7 @@ struct dm_report_zones_args {
 	/* must be filled by ->report_zones before calling dm_report_zones_cb */
 	sector_t start;
 };
-int dm_report_zones(struct block_device *bdev, sector_t start, sector_t sector,
-		    struct dm_report_zones_args *args, unsigned int nr_zones);
+int dm_report_zones_cb(struct blk_zone *zone, unsigned int idx, void *data);
 #endif /* CONFIG_BLK_DEV_ZONED */
 
 /*

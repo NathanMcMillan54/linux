@@ -993,8 +993,14 @@ static bool icmp_redirect(struct sk_buff *skb)
 
 static bool icmp_echo(struct sk_buff *skb)
 {
+	struct icmp_ext_hdr *ext_hdr, _ext_hdr;
+	struct icmp_ext_echo_iio *iio, _iio;
 	struct icmp_bxm icmp_param;
+	struct net_device *dev;
+	char buff[IFNAMSIZ];
 	struct net *net;
+	u16 ident_len;
+	u8 status;
 
 	net = dev_net(skb_dst(skb)->dev);
 	/* should there be an ICMP stat for ignored echos? */
@@ -1007,46 +1013,20 @@ static bool icmp_echo(struct sk_buff *skb)
 	icmp_param.data_len	   = skb->len;
 	icmp_param.head_len	   = sizeof(struct icmphdr);
 
-	if (icmp_param.data.icmph.type == ICMP_ECHO)
+	if (icmp_param.data.icmph.type == ICMP_ECHO) {
 		icmp_param.data.icmph.type = ICMP_ECHOREPLY;
-	else if (!icmp_build_probe(skb, &icmp_param.data.icmph))
-		return true;
-
-	icmp_reply(&icmp_param, skb);
-	return true;
-}
-
-/*	Helper for icmp_echo and icmpv6_echo_reply.
- *	Searches for net_device that matches PROBE interface identifier
- *		and builds PROBE reply message in icmphdr.
- *
- *	Returns false if PROBE responses are disabled via sysctl
- */
-
-bool icmp_build_probe(struct sk_buff *skb, struct icmphdr *icmphdr)
-{
-	struct icmp_ext_hdr *ext_hdr, _ext_hdr;
-	struct icmp_ext_echo_iio *iio, _iio;
-	struct net *net = dev_net(skb->dev);
-	struct net_device *dev;
-	char buff[IFNAMSIZ];
-	u16 ident_len;
-	u8 status;
-
+		goto send_reply;
+	}
 	if (!net->ipv4.sysctl_icmp_echo_enable_probe)
-		return false;
-
+		return true;
 	/* We currently only support probing interfaces on the proxy node
 	 * Check to ensure L-bit is set
 	 */
-	if (!(ntohs(icmphdr->un.echo.sequence) & 1))
-		return false;
+	if (!(ntohs(icmp_param.data.icmph.un.echo.sequence) & 1))
+		return true;
 	/* Clear status bits in reply message */
-	icmphdr->un.echo.sequence &= htons(0xFF00);
-	if (icmphdr->type == ICMP_EXT_ECHO)
-		icmphdr->type = ICMP_EXT_ECHOREPLY;
-	else
-		icmphdr->type = ICMPV6_EXT_ECHO_REPLY;
+	icmp_param.data.icmph.un.echo.sequence &= htons(0xFF00);
+	icmp_param.data.icmph.type = ICMP_EXT_ECHOREPLY;
 	ext_hdr = skb_header_pointer(skb, 0, sizeof(_ext_hdr), &_ext_hdr);
 	/* Size of iio is class_type dependent.
 	 * Only check header here and assign length based on ctype in the switch statement
@@ -1086,7 +1066,7 @@ bool icmp_build_probe(struct sk_buff *skb, struct icmphdr *icmphdr)
 			if (ident_len != sizeof(iio->ident.addr.ctype3_hdr) +
 					 sizeof(struct in_addr))
 				goto send_mal_query;
-			dev = ip_dev_find(net, iio->ident.addr.ip_addr.ipv4_addr);
+			dev = ip_dev_find(net, iio->ident.addr.ip_addr.ipv4_addr.s_addr);
 			break;
 #if IS_ENABLED(CONFIG_IPV6)
 		case ICMP_AFI_IP6:
@@ -1107,8 +1087,8 @@ bool icmp_build_probe(struct sk_buff *skb, struct icmphdr *icmphdr)
 		goto send_mal_query;
 	}
 	if (!dev) {
-		icmphdr->code = ICMP_EXT_CODE_NO_IF;
-		return true;
+		icmp_param.data.icmph.code = ICMP_EXT_CODE_NO_IF;
+		goto send_reply;
 	}
 	/* Fill bits in reply message */
 	if (dev->flags & IFF_UP)
@@ -1118,13 +1098,14 @@ bool icmp_build_probe(struct sk_buff *skb, struct icmphdr *icmphdr)
 	if (!list_empty(&rcu_dereference(dev->ip6_ptr)->addr_list))
 		status |= ICMP_EXT_ECHOREPLY_IPV6;
 	dev_put(dev);
-	icmphdr->un.echo.sequence |= htons(status);
-	return true;
+	icmp_param.data.icmph.un.echo.sequence |= htons(status);
+send_reply:
+	icmp_reply(&icmp_param, skb);
+		return true;
 send_mal_query:
-	icmphdr->code = ICMP_EXT_CODE_MAL_QUERY;
-	return true;
+	icmp_param.data.icmph.code = ICMP_EXT_CODE_MAL_QUERY;
+	goto send_reply;
 }
-EXPORT_SYMBOL_GPL(icmp_build_probe);
 
 /*
  *	Handle ICMP Timestamp requests.

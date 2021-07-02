@@ -734,7 +734,7 @@ static const u32 GFX_RLC_SRM_INDEX_CNTL_DATA_OFFSETS[] =
 	mmRLC_SRM_INDEX_CNTL_DATA_7 - mmRLC_SRM_INDEX_CNTL_DATA_0,
 };
 
-static void gfx_v9_0_rlcg_w(struct amdgpu_device *adev, u32 offset, u32 v, u32 flag)
+static void gfx_v9_0_rlcg_rw(struct amdgpu_device *adev, u32 offset, u32 v, u32 flag)
 {
 	static void *scratch_reg0;
 	static void *scratch_reg1;
@@ -787,17 +787,15 @@ static void gfx_v9_0_rlcg_w(struct amdgpu_device *adev, u32 offset, u32 v, u32 f
 
 }
 
-static void gfx_v9_0_rlcg_wreg(struct amdgpu_device *adev, u32 offset,
-			       u32 v, u32 acc_flags, u32 hwip)
+static void gfx_v9_0_rlcg_wreg(struct amdgpu_device *adev, u32 offset, u32 v, u32 flag)
 {
-	if ((acc_flags & AMDGPU_REGS_RLC) &&
-	    amdgpu_sriov_fullaccess(adev)) {
-		gfx_v9_0_rlcg_w(adev, offset, v, acc_flags);
+	if (amdgpu_sriov_fullaccess(adev)) {
+		gfx_v9_0_rlcg_rw(adev, offset, v, flag);
 
 		return;
 	}
 
-	if (acc_flags & AMDGPU_REGS_NO_KIQ)
+	if (flag & AMDGPU_REGS_NO_KIQ)
 		WREG32_NO_KIQ(offset, v);
 	else
 		WREG32(offset, v);
@@ -3939,8 +3937,7 @@ static void gfx_v9_0_init_tcp_config(struct amdgpu_device *adev)
 {
 	u32 tmp;
 
-	if (adev->asic_type != CHIP_ARCTURUS &&
-	    adev->asic_type != CHIP_ALDEBARAN)
+	if (adev->asic_type != CHIP_ARCTURUS)
 		return;
 
 	tmp = RREG32_SOC15(GC, 0, mmTCP_ADDR_CONFIG);
@@ -4562,7 +4559,8 @@ static int gfx_v9_0_do_edc_gpr_workarounds(struct amdgpu_device *adev)
 	if (!ring->sched.ready)
 		return 0;
 
-	if (adev->asic_type == CHIP_ARCTURUS) {
+	if (adev->asic_type == CHIP_ARCTURUS ||
+	    adev->asic_type == CHIP_ALDEBARAN) {
 		vgpr_init_shader_ptr = vgpr_init_compute_shader_arcturus;
 		vgpr_init_shader_size = sizeof(vgpr_init_compute_shader_arcturus);
 		vgpr_init_regs_ptr = vgpr_init_regs_arcturus;
@@ -4747,11 +4745,7 @@ static int gfx_v9_0_ecc_late_init(void *handle)
 	}
 
 	/* requires IBs so do in late init after IB pool is initialized */
-	if (adev->asic_type == CHIP_ALDEBARAN)
-		r = gfx_v9_4_2_do_edc_gpr_workarounds(adev);
-	else
-		r = gfx_v9_0_do_edc_gpr_workarounds(adev);
-
+	r = gfx_v9_0_do_edc_gpr_workarounds(adev);
 	if (r)
 		return r;
 

@@ -1046,6 +1046,7 @@ struct context_barrier_task {
 	void *data;
 };
 
+__i915_active_call
 static void cb_retire(struct i915_active *base)
 {
 	struct context_barrier_task *cb = container_of(base, typeof(*cb), base);
@@ -1079,7 +1080,7 @@ static int context_barrier_task(struct i915_gem_context *ctx,
 	if (!cb)
 		return -ENOMEM;
 
-	i915_active_init(&cb->base, NULL, cb_retire, 0);
+	i915_active_init(&cb->base, NULL, cb_retire);
 	err = i915_active_acquire(&cb->base);
 	if (err) {
 		kfree(cb);
@@ -1190,7 +1191,7 @@ static void set_ppgtt_barrier(void *data)
 {
 	struct i915_address_space *old = data;
 
-	if (GRAPHICS_VER(old->i915) < 8)
+	if (INTEL_GEN(old->i915) < 8)
 		gen6_ppgtt_unpin_all(i915_vm_to_ppgtt(old));
 
 	i915_vm_close(old);
@@ -1436,7 +1437,7 @@ i915_gem_user_to_context_sseu(struct intel_gt *gt,
 	context->max_eus_per_subslice = user->max_eus_per_subslice;
 
 	/* Part specific restrictions. */
-	if (GRAPHICS_VER(i915) == 11) {
+	if (IS_GEN(i915, 11)) {
 		unsigned int hw_s = hweight8(device->slice_mask);
 		unsigned int hw_ss_per_s = hweight8(device->subslice_mask[0]);
 		unsigned int req_s = hweight8(context->slice_mask);
@@ -1503,7 +1504,7 @@ static int set_sseu(struct i915_gem_context *ctx,
 	if (args->size < sizeof(user_sseu))
 		return -EINVAL;
 
-	if (GRAPHICS_VER(i915) != 11)
+	if (!IS_GEN(i915, 11))
 		return -ENODEV;
 
 	if (copy_from_user(&user_sseu, u64_to_user_ptr(args->value),

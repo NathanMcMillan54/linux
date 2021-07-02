@@ -451,8 +451,7 @@ static void mptcp_pm_create_subflow_or_signal_addr(struct mptcp_sock *msk)
 
 	/* check if should create a new subflow */
 	if (msk->pm.local_addr_used < local_addr_max &&
-	    msk->pm.subflows < subflows_max &&
-	    !READ_ONCE(msk->pm.remote_deny_join_id0)) {
+	    msk->pm.subflows < subflows_max) {
 		local = select_local_address(pernet, msk);
 		if (local) {
 			struct mptcp_addr_info remote = { 0 };
@@ -541,7 +540,6 @@ void mptcp_pm_nl_addr_send_ack(struct mptcp_sock *msk)
 	subflow = list_first_entry_or_null(&msk->conn_list, typeof(*subflow), node);
 	if (subflow) {
 		struct sock *ssk = mptcp_subflow_tcp_sock(subflow);
-		bool slow;
 
 		spin_unlock_bh(&msk->pm.lock);
 		pr_debug("send ack for %s%s%s",
@@ -549,9 +547,9 @@ void mptcp_pm_nl_addr_send_ack(struct mptcp_sock *msk)
 			 mptcp_pm_should_add_signal_ipv6(msk) ? " [ipv6]" : "",
 			 mptcp_pm_should_add_signal_port(msk) ? " [port]" : "");
 
-		slow = lock_sock_fast(ssk);
+		lock_sock(ssk);
 		tcp_send_ack(ssk);
-		unlock_sock_fast(ssk, slow);
+		release_sock(ssk);
 		spin_lock_bh(&msk->pm.lock);
 	}
 }
@@ -568,7 +566,6 @@ int mptcp_pm_nl_mp_prio_send_ack(struct mptcp_sock *msk,
 		struct sock *ssk = mptcp_subflow_tcp_sock(subflow);
 		struct sock *sk = (struct sock *)msk;
 		struct mptcp_addr_info local;
-		bool slow;
 
 		local_address((struct sock_common *)ssk, &local);
 		if (!addresses_equal(&local, addr, addr->port))
@@ -581,9 +578,9 @@ int mptcp_pm_nl_mp_prio_send_ack(struct mptcp_sock *msk,
 
 		spin_unlock_bh(&msk->pm.lock);
 		pr_debug("send ack for mp_prio");
-		slow = lock_sock_fast(ssk);
+		lock_sock(ssk);
 		tcp_send_ack(ssk);
-		unlock_sock_fast(ssk, slow);
+		release_sock(ssk);
 		spin_lock_bh(&msk->pm.lock);
 
 		return 0;
@@ -974,14 +971,8 @@ skip_family:
 	if (tb[MPTCP_PM_ADDR_ATTR_FLAGS])
 		entry->flags = nla_get_u32(tb[MPTCP_PM_ADDR_ATTR_FLAGS]);
 
-	if (tb[MPTCP_PM_ADDR_ATTR_PORT]) {
-		if (!(entry->flags & MPTCP_PM_ADDR_FLAG_SIGNAL)) {
-			NL_SET_ERR_MSG_ATTR(info->extack, attr,
-					    "flags must have signal when using port");
-			return -EINVAL;
-		}
+	if (tb[MPTCP_PM_ADDR_ATTR_PORT])
 		entry->addr.port = htons(nla_get_u16(tb[MPTCP_PM_ADDR_ATTR_PORT]));
-	}
 
 	return 0;
 }
@@ -1922,13 +1913,10 @@ static int __net_init pm_nl_init_net(struct net *net)
 	struct pm_nl_pernet *pernet = net_generic(net, pm_nl_pernet_id);
 
 	INIT_LIST_HEAD_RCU(&pernet->local_addr_list);
+	__reset_counters(pernet);
 	pernet->next_id = 1;
+	bitmap_zero(pernet->id_bitmap, MAX_ADDR_ID + 1);
 	spin_lock_init(&pernet->lock);
-
-	/* No need to initialize other pernet fields, the struct is zeroed at
-	 * allocation time.
-	 */
-
 	return 0;
 }
 

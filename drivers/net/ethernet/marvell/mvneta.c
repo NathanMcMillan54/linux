@@ -1805,14 +1805,18 @@ static void mvneta_rx_error(struct mvneta_port *pp,
 }
 
 /* Handle RX checksum offload based on the descriptor's status */
-static int mvneta_rx_csum(struct mvneta_port *pp, u32 status)
+static void mvneta_rx_csum(struct mvneta_port *pp, u32 status,
+			   struct sk_buff *skb)
 {
 	if ((pp->dev->features & NETIF_F_RXCSUM) &&
 	    (status & MVNETA_RXD_L3_IP4) &&
-	    (status & MVNETA_RXD_L4_CSUM_OK))
-		return CHECKSUM_UNNECESSARY;
+	    (status & MVNETA_RXD_L4_CSUM_OK)) {
+		skb->csum = 0;
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
+		return;
+	}
 
-	return CHECKSUM_NONE;
+	skb->ip_summed = CHECKSUM_NONE;
 }
 
 /* Return tx queue pointer (find last set bit) according to <cause> returned
@@ -2316,7 +2320,7 @@ mvneta_swbm_add_rx_fragment(struct mvneta_port *pp,
 }
 
 static struct sk_buff *
-mvneta_swbm_build_skb(struct mvneta_port *pp, struct page_pool *pool,
+mvneta_swbm_build_skb(struct mvneta_port *pp, struct mvneta_rx_queue *rxq,
 		      struct xdp_buff *xdp, u32 desc_status)
 {
 	struct skb_shared_info *sinfo = xdp_get_shared_info_from_buff(xdp);
@@ -2327,11 +2331,11 @@ mvneta_swbm_build_skb(struct mvneta_port *pp, struct page_pool *pool,
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
 
-	skb_mark_for_recycle(skb, virt_to_page(xdp->data), pool);
+	page_pool_release_page(rxq->page_pool, virt_to_page(xdp->data));
 
 	skb_reserve(skb, xdp->data - xdp->data_hard_start);
 	skb_put(skb, xdp->data_end - xdp->data);
-	skb->ip_summed = mvneta_rx_csum(pp, desc_status);
+	mvneta_rx_csum(pp, desc_status, skb);
 
 	for (i = 0; i < num_frags; i++) {
 		skb_frag_t *frag = &sinfo->frags[i];
@@ -2339,10 +2343,7 @@ mvneta_swbm_build_skb(struct mvneta_port *pp, struct page_pool *pool,
 		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags,
 				skb_frag_page(frag), skb_frag_off(frag),
 				skb_frag_size(frag), PAGE_SIZE);
-		/* We don't need to reset pp_recycle here. It's already set, so
-		 * just mark fragments for recycling.
-		 */
-		page_pool_store_mem_info(skb_frag_page(frag), pool);
+		page_pool_release_page(rxq->page_pool, skb_frag_page(frag));
 	}
 
 	return skb;
@@ -2369,6 +2370,7 @@ static int mvneta_rx_swbm(struct napi_struct *napi,
 	/* Get number of received packets */
 	rx_todo = mvneta_rxq_busy_desc_num_get(pp, rxq);
 
+	rcu_read_lock();
 	xdp_prog = READ_ONCE(pp->xdp_prog);
 
 	/* Fairness NAPI loop */
@@ -2423,7 +2425,7 @@ static int mvneta_rx_swbm(struct napi_struct *napi,
 		    mvneta_run_xdp(pp, rxq, xdp_prog, &xdp_buf, frame_sz, &ps))
 			goto next;
 
-		skb = mvneta_swbm_build_skb(pp, rxq->page_pool, &xdp_buf, desc_status);
+		skb = mvneta_swbm_build_skb(pp, rxq, &xdp_buf, desc_status);
 		if (IS_ERR(skb)) {
 			struct mvneta_pcpu_stats *stats = this_cpu_ptr(pp->stats);
 
@@ -2446,6 +2448,7 @@ next:
 		xdp_buf.data_hard_start = NULL;
 		sinfo.nr_frags = 0;
 	}
+	rcu_read_unlock();
 
 	if (xdp_buf.data_hard_start)
 		mvneta_xdp_put_buff(pp, rxq, &xdp_buf, &sinfo, -1);
@@ -2529,7 +2532,7 @@ err_drop_frame:
 				     rx_bytes);
 
 			skb->protocol = eth_type_trans(skb, dev);
-			skb->ip_summed = mvneta_rx_csum(pp, rx_status);
+			mvneta_rx_csum(pp, rx_status, skb);
 			napi_gro_receive(napi, skb);
 
 			rcvd_pkts++;
@@ -2578,7 +2581,8 @@ err_drop_frame:
 		skb_put(skb, rx_bytes);
 
 		skb->protocol = eth_type_trans(skb, dev);
-		skb->ip_summed = mvneta_rx_csum(pp, rx_status);
+
+		mvneta_rx_csum(pp, rx_status, skb);
 
 		napi_gro_receive(napi, skb);
 	}

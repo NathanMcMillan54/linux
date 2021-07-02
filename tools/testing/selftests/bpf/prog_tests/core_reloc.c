@@ -369,7 +369,8 @@ static int setup_type_id_case_local(struct core_reloc_test_case *test)
 	const char *name;
 	int i;
 
-	if (!ASSERT_OK_PTR(local_btf, "local_btf") || !ASSERT_OK_PTR(targ_btf, "targ_btf")) {
+	if (CHECK(IS_ERR(local_btf), "local_btf", "failed: %ld\n", PTR_ERR(local_btf)) ||
+	    CHECK(IS_ERR(targ_btf), "targ_btf", "failed: %ld\n", PTR_ERR(targ_btf))) {
 		btf__free(local_btf);
 		btf__free(targ_btf);
 		return -EINVAL;
@@ -847,7 +848,8 @@ void test_core_reloc(void)
 		}
 
 		obj = bpf_object__open_file(test_case->bpf_obj_file, NULL);
-		if (!ASSERT_OK_PTR(obj, "obj_open"))
+		if (CHECK(IS_ERR(obj), "obj_open", "failed to open '%s': %ld\n",
+			  test_case->bpf_obj_file, PTR_ERR(obj)))
 			continue;
 
 		probe_name = "raw_tracepoint/sys_enter";
@@ -897,7 +899,8 @@ void test_core_reloc(void)
 		data->my_pid_tgid = my_pid_tgid;
 
 		link = bpf_program__attach_raw_tracepoint(prog, tp_name);
-		if (!ASSERT_OK_PTR(link, "attach_raw_tp"))
+		if (CHECK(IS_ERR(link), "attach_raw_tp", "err %ld\n",
+			  PTR_ERR(link)))
 			goto cleanup;
 
 		/* trigger test run */
@@ -938,8 +941,10 @@ cleanup:
 			CHECK_FAIL(munmap(mmap_data, mmap_sz));
 			mmap_data = NULL;
 		}
-		bpf_link__destroy(link);
-		link = NULL;
+		if (!IS_ERR_OR_NULL(link)) {
+			bpf_link__destroy(link);
+			link = NULL;
+		}
 		bpf_object__close(obj);
 	}
 }

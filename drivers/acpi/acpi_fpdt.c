@@ -240,10 +240,8 @@ static int __init acpi_init_fpdt(void)
 		return 0;
 
 	fpdt_kobj = kobject_create_and_add("fpdt", acpi_kobj);
-	if (!fpdt_kobj) {
-		acpi_put_table(header);
+	if (!fpdt_kobj)
 		return -ENOMEM;
-	}
 
 	while (offset < header->length) {
 		subtable = (void *)header + offset;

@@ -82,7 +82,7 @@ static void *server(void *arg)
 	      bytes, total_bytes, nr_sent, errno);
 
 done:
-	if (fd >= 0)
+	if (fd != -1)
 		close(fd);
 	if (err) {
 		WRITE_ONCE(stop, 1);
@@ -191,7 +191,8 @@ static void test_cubic(void)
 		return;
 
 	link = bpf_map__attach_struct_ops(cubic_skel->maps.cubic);
-	if (!ASSERT_OK_PTR(link, "bpf_map__attach_struct_ops")) {
+	if (CHECK(IS_ERR(link), "bpf_map__attach_struct_ops", "err:%ld\n",
+		  PTR_ERR(link))) {
 		bpf_cubic__destroy(cubic_skel);
 		return;
 	}
@@ -212,7 +213,8 @@ static void test_dctcp(void)
 		return;
 
 	link = bpf_map__attach_struct_ops(dctcp_skel->maps.dctcp);
-	if (!ASSERT_OK_PTR(link, "bpf_map__attach_struct_ops")) {
+	if (CHECK(IS_ERR(link), "bpf_map__attach_struct_ops", "err:%ld\n",
+		  PTR_ERR(link))) {
 		bpf_dctcp__destroy(dctcp_skel);
 		return;
 	}

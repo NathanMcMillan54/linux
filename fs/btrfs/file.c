@@ -28,7 +28,6 @@
 #include "compression.h"
 #include "delalloc-space.h"
 #include "reflink.h"
-#include "subpage.h"
 
 static struct kmem_cache *btrfs_inode_defrag_cachep;
 /*
@@ -483,7 +482,6 @@ int btrfs_dirty_pages(struct btrfs_inode *inode, struct page **pages,
 	start_pos = round_down(pos, fs_info->sectorsize);
 	num_bytes = round_up(write_bytes + pos - start_pos,
 			     fs_info->sectorsize);
-	ASSERT(num_bytes <= U32_MAX);
 
 	end_of_last_block = start_pos + num_bytes - 1;
 
@@ -502,10 +500,9 @@ int btrfs_dirty_pages(struct btrfs_inode *inode, struct page **pages,
 
 	for (i = 0; i < num_pages; i++) {
 		struct page *p = pages[i];
-
-		btrfs_page_clamp_set_uptodate(fs_info, p, start_pos, num_bytes);
+		SetPageUptodate(p);
 		ClearPageChecked(p);
-		btrfs_page_clamp_set_dirty(fs_info, p, start_pos, num_bytes);
+		set_page_dirty(p);
 	}
 
 	/*
@@ -2486,17 +2483,6 @@ static int btrfs_punch_hole_lock_range(struct inode *inode,
 				       const u64 lockend,
 				       struct extent_state **cached_state)
 {
-	/*
-	 * For subpage case, if the range is not at page boundary, we could
-	 * have pages at the leading/tailing part of the range.
-	 * This could lead to dead loop since filemap_range_has_page()
-	 * will always return true.
-	 * So here we need to do extra page alignment for
-	 * filemap_range_has_page().
-	 */
-	const u64 page_lockstart = round_up(lockstart, PAGE_SIZE);
-	const u64 page_lockend = round_down(lockend + 1, PAGE_SIZE) - 1;
-
 	while (1) {
 		struct btrfs_ordered_extent *ordered;
 		int ret;
@@ -2517,7 +2503,7 @@ static int btrfs_punch_hole_lock_range(struct inode *inode,
 		    (ordered->file_offset + ordered->num_bytes <= lockstart ||
 		     ordered->file_offset > lockend)) &&
 		     !filemap_range_has_page(inode->i_mapping,
-					     page_lockstart, page_lockend)) {
+					     lockstart, lockend)) {
 			if (ordered)
 				btrfs_put_ordered_extent(ordered);
 			break;
@@ -3048,20 +3034,22 @@ struct falloc_range {
  */
 static int add_falloc_range(struct list_head *head, u64 start, u64 len)
 {
+	struct falloc_range *prev = NULL;
 	struct falloc_range *range = NULL;
 
-	if (!list_empty(head)) {
-		/*
-		 * As fallocate iterates by bytenr order, we only need to check
-		 * the last range.
-		 */
-		range = list_last_entry(head, struct falloc_range, list);
-		if (range->start + range->len == start) {
-			range->len += len;
-			return 0;
-		}
-	}
+	if (list_empty(head))
+		goto insert;
 
+	/*
+	 * As fallocate iterate by bytenr order, we only need to check
+	 * the last range.
+	 */
+	prev = list_entry(head->prev, struct falloc_range, list);
+	if (prev->start + prev->len == start) {
+		prev->len += len;
+		return 0;
+	}
+insert:
 	range = kmalloc(sizeof(*range), GFP_KERNEL);
 	if (!range)
 		return -ENOMEM;

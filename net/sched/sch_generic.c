@@ -52,8 +52,6 @@ static void qdisc_maybe_clear_missed(struct Qdisc *q,
 	 */
 	if (!netif_xmit_frozen_or_stopped(txq))
 		set_bit(__QDISC_STATE_MISSED, &q->state);
-	else
-		set_bit(__QDISC_STATE_DRAINING, &q->state);
 }
 
 /* Main transmission queue. */
@@ -166,13 +164,9 @@ static inline void dev_requeue_skb(struct sk_buff *skb, struct Qdisc *q)
 
 		skb = next;
 	}
-
-	if (lock) {
+	if (lock)
 		spin_unlock(lock);
-		set_bit(__QDISC_STATE_MISSED, &q->state);
-	} else {
-		__netif_schedule(q);
-	}
+	__netif_schedule(q);
 }
 
 static void try_bulk_dequeue_skb(struct Qdisc *q,
@@ -415,11 +409,7 @@ void __qdisc_run(struct Qdisc *q)
 	while (qdisc_restart(q, &packets)) {
 		quota -= packets;
 		if (quota <= 0) {
-			if (q->flags & TCQ_F_NOLOCK)
-				set_bit(__QDISC_STATE_MISSED, &q->state);
-			else
-				__netif_schedule(q);
-
+			__netif_schedule(q);
 			break;
 		}
 	}
@@ -549,24 +539,6 @@ void netif_carrier_off(struct net_device *dev)
 	}
 }
 EXPORT_SYMBOL(netif_carrier_off);
-
-/**
- *	netif_carrier_event - report carrier state event
- *	@dev: network device
- *
- * Device has detected a carrier event but the carrier state wasn't changed.
- * Use in drivers when querying carrier state asynchronously, to avoid missing
- * events (link flaps) if link recovers before it's queried.
- */
-void netif_carrier_event(struct net_device *dev)
-{
-	if (dev->reg_state == NETREG_UNINITIALIZED)
-		return;
-	atomic_inc(&dev->carrier_up_count);
-	atomic_inc(&dev->carrier_down_count);
-	linkwatch_fire_event(dev);
-}
-EXPORT_SYMBOL_GPL(netif_carrier_event);
 
 /* "NOOP" scheduler: the best scheduler, recommended for all interfaces
    under all circumstances. It is difficult to invent anything faster or
@@ -708,14 +680,13 @@ retry:
 	if (likely(skb)) {
 		qdisc_update_stats_at_dequeue(qdisc, skb);
 	} else if (need_retry &&
-		   READ_ONCE(qdisc->state) & QDISC_STATE_NON_EMPTY) {
+		   test_bit(__QDISC_STATE_MISSED, &qdisc->state)) {
 		/* Delay clearing the STATE_MISSED here to reduce
 		 * the overhead of the second spin_trylock() in
 		 * qdisc_run_begin() and __netif_schedule() calling
 		 * in qdisc_run_end().
 		 */
 		clear_bit(__QDISC_STATE_MISSED, &qdisc->state);
-		clear_bit(__QDISC_STATE_DRAINING, &qdisc->state);
 
 		/* Make sure dequeuing happens after clearing
 		 * STATE_MISSED.
@@ -725,6 +696,8 @@ retry:
 		need_retry = false;
 
 		goto retry;
+	} else {
+		WRITE_ONCE(qdisc->empty, true);
 	}
 
 	return skb;
@@ -925,6 +898,7 @@ struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 	sch->enqueue = ops->enqueue;
 	sch->dequeue = ops->dequeue;
 	sch->dev_queue = dev_queue;
+	sch->empty = true;
 	dev_hold(dev);
 	refcount_set(&sch->refcnt, 1);
 
@@ -1230,7 +1204,6 @@ static void dev_reset_queue(struct net_device *dev,
 	spin_unlock_bh(qdisc_lock(qdisc));
 	if (nolock) {
 		clear_bit(__QDISC_STATE_MISSED, &qdisc->state);
-		clear_bit(__QDISC_STATE_DRAINING, &qdisc->state);
 		spin_unlock_bh(&qdisc->seqlock);
 	}
 }

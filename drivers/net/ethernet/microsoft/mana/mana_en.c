@@ -1230,10 +1230,8 @@ static int mana_create_txq(struct mana_port_context *apc,
 
 		cq->gdma_id = cq->gdma_cq->id;
 
-		if (WARN_ON(cq->gdma_id >= gc->max_num_cqs)) {
-			err = -EINVAL;
-			goto out;
-		}
+		if (WARN_ON(cq->gdma_id >= gc->max_num_cqs))
+			return -EINVAL;
 
 		gc->cq_table[cq->gdma_id] = cq->gdma_cq;
 
@@ -1389,7 +1387,8 @@ static struct mana_rxq *mana_create_rxq(struct mana_port_context *apc,
 
 	gc = gd->gdma_context;
 
-	rxq = kzalloc(struct_size(rxq, rx_oobs, RX_BUFFERS_PER_QUEUE),
+	rxq = kzalloc(sizeof(*rxq) +
+		      RX_BUFFERS_PER_QUEUE * sizeof(struct mana_recv_buf_oob),
 		      GFP_KERNEL);
 	if (!rxq)
 		return NULL;

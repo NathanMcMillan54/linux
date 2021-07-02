@@ -705,7 +705,7 @@ out:
 int __bond_opt_set_notify(struct bonding *bond,
 			  unsigned int option, struct bond_opt_value *val)
 {
-	int ret;
+	int ret = -ENOENT;
 
 	ASSERT_RTNL();
 
@@ -1206,7 +1206,8 @@ static int bond_option_primary_set(struct bonding *bond,
 		RCU_INIT_POINTER(bond->primary_slave, NULL);
 		bond_select_active_slave(bond);
 	}
-	strscpy_pad(bond->params.primary, primary, IFNAMSIZ);
+	strncpy(bond->params.primary, primary, IFNAMSIZ);
+	bond->params.primary[IFNAMSIZ - 1] = 0;
 
 	netdev_dbg(bond->dev, "Recording %s as primary, but it has not been enslaved yet\n",
 		   primary);

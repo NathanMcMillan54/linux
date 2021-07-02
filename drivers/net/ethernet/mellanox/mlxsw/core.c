@@ -630,7 +630,7 @@ static int mlxsw_emad_transmit(struct mlxsw_core *mlxsw_core,
 	struct sk_buff *skb;
 	int err;
 
-	skb = skb_clone(trans->tx_skb, GFP_KERNEL);
+	skb = skb_copy(trans->tx_skb, GFP_KERNEL);
 	if (!skb)
 		return -ENOMEM;
 
@@ -1444,9 +1444,7 @@ mlxsw_devlink_info_get(struct devlink *devlink, struct devlink_info_req *req,
 	if (err)
 		return err;
 
-	err = devlink_info_version_fixed_put(req,
-					     DEVLINK_INFO_VERSION_GENERIC_FW_PSID,
-					     fw_info_psid);
+	err = devlink_info_version_fixed_put(req, "fw.psid", fw_info_psid);
 	if (err)
 		return err;
 
@@ -1455,9 +1453,7 @@ mlxsw_devlink_info_get(struct devlink *devlink, struct devlink_info_req *req,
 	if (err)
 		return err;
 
-	return devlink_info_version_running_put(req,
-						DEVLINK_INFO_VERSION_GENERIC_FW,
-						buf);
+	return 0;
 }
 
 static int

@@ -475,7 +475,6 @@ int kunit_add_resource(struct kunit *test,
 		       void *data)
 {
 	int ret = 0;
-	unsigned long flags;
 
 	res->free = free;
 	kref_init(&res->refcount);
@@ -488,10 +487,10 @@ int kunit_add_resource(struct kunit *test,
 		res->data = data;
 	}
 
-	spin_lock_irqsave(&test->lock, flags);
+	spin_lock(&test->lock);
 	list_add_tail(&res->node, &test->resources);
 	/* refcount for list is established by kref_init() */
-	spin_unlock_irqrestore(&test->lock, flags);
+	spin_unlock(&test->lock);
 
 	return ret;
 }
@@ -549,11 +548,9 @@ EXPORT_SYMBOL_GPL(kunit_alloc_and_get_resource);
 
 void kunit_remove_resource(struct kunit *test, struct kunit_resource *res)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&test->lock, flags);
+	spin_lock(&test->lock);
 	list_del(&res->node);
-	spin_unlock_irqrestore(&test->lock, flags);
+	spin_unlock(&test->lock);
 	kunit_put_resource(res);
 }
 EXPORT_SYMBOL_GPL(kunit_remove_resource);
@@ -633,7 +630,6 @@ EXPORT_SYMBOL_GPL(kunit_kfree);
 void kunit_cleanup(struct kunit *test)
 {
 	struct kunit_resource *res;
-	unsigned long flags;
 
 	/*
 	 * test->resources is a stack - each allocation must be freed in the
@@ -645,9 +641,9 @@ void kunit_cleanup(struct kunit *test)
 	 * protect against the current node being deleted, not the next.
 	 */
 	while (true) {
-		spin_lock_irqsave(&test->lock, flags);
+		spin_lock(&test->lock);
 		if (list_empty(&test->resources)) {
-			spin_unlock_irqrestore(&test->lock, flags);
+			spin_unlock(&test->lock);
 			break;
 		}
 		res = list_last_entry(&test->resources,
@@ -658,7 +654,7 @@ void kunit_cleanup(struct kunit *test)
 		 * resource, and this can't happen if the test->lock
 		 * is held.
 		 */
-		spin_unlock_irqrestore(&test->lock, flags);
+		spin_unlock(&test->lock);
 		kunit_remove_resource(test, res);
 	}
 	current->kunit_test = NULL;

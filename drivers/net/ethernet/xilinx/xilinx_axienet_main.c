@@ -1543,7 +1543,6 @@ static void axienet_validate(struct phylink_config *config,
 	case PHY_INTERFACE_MODE_MII:
 		phylink_set(mask, 100baseT_Full);
 		phylink_set(mask, 10baseT_Full);
-		fallthrough;
 	default:
 		break;
 	}
@@ -1894,7 +1893,8 @@ static int axienet_probe(struct platform_device *pdev)
 		goto cleanup_clk;
 
 	/* Map device registers */
-	lp->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &ethres);
+	ethres = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	lp->regs = devm_ioremap_resource(&pdev->dev, ethres);
 	if (IS_ERR(lp->regs)) {
 		ret = PTR_ERR(lp->regs);
 		goto cleanup_clk;
@@ -2009,7 +2009,9 @@ static int axienet_probe(struct platform_device *pdev)
 		lp->eth_irq = platform_get_irq_optional(pdev, 0);
 	} else {
 		/* Check for these resources directly on the Ethernet node. */
-		lp->dma_regs = devm_platform_get_and_ioremap_resource(pdev, 1, NULL);
+		struct resource *res = platform_get_resource(pdev,
+							     IORESOURCE_MEM, 1);
+		lp->dma_regs = devm_ioremap_resource(&pdev->dev, res);
 		lp->rx_irq = platform_get_irq(pdev, 1);
 		lp->tx_irq = platform_get_irq(pdev, 0);
 		lp->eth_irq = platform_get_irq_optional(pdev, 2);

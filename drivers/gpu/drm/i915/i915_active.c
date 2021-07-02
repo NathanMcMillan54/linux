@@ -343,15 +343,18 @@ out:
 void __i915_active_init(struct i915_active *ref,
 			int (*active)(struct i915_active *ref),
 			void (*retire)(struct i915_active *ref),
-			unsigned long flags,
 			struct lock_class_key *mkey,
 			struct lock_class_key *wkey)
 {
+	unsigned long bits;
+
 	debug_active_init(ref);
 
-	ref->flags = flags;
+	ref->flags = 0;
 	ref->active = active;
-	ref->retire = retire;
+	ref->retire = ptr_unpack_bits(retire, &bits, 2);
+	if (bits & I915_ACTIVE_MAY_SLEEP)
+		ref->flags |= I915_ACTIVE_RETIRE_SLEEPS;
 
 	spin_lock_init(&ref->tree_lock);
 	ref->tree = RB_ROOT;
@@ -1153,7 +1156,8 @@ static int auto_active(struct i915_active *ref)
 	return 0;
 }
 
-static void auto_retire(struct i915_active *ref)
+__i915_active_call static void
+auto_retire(struct i915_active *ref)
 {
 	i915_active_put(ref);
 }
@@ -1167,7 +1171,7 @@ struct i915_active *i915_active_create(void)
 		return NULL;
 
 	kref_init(&aa->ref);
-	i915_active_init(&aa->base, auto_active, auto_retire, 0);
+	i915_active_init(&aa->base, auto_active, auto_retire);
 
 	return &aa->base;
 }

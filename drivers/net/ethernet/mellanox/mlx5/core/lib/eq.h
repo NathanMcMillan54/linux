@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
-/* Copyright (c) 2018-2021, Mellanox Technologies inc.  All rights reserved. */
+/* Copyright (c) 2018 Mellanox Technologies */
 
 #ifndef __LIB_MLX5_EQ_H__
 #define __LIB_MLX5_EQ_H__
@@ -32,7 +32,6 @@ struct mlx5_eq {
 	unsigned int            irqn;
 	u8                      eqn;
 	struct mlx5_rsc_debug   *dbg;
-	struct mlx5_irq         *irq;
 };
 
 struct mlx5_eq_async {

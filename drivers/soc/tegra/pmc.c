@@ -743,6 +743,11 @@ out:
 	return err;
 }
 
+int __weak tegra210_clk_handle_mbist_war(unsigned int id)
+{
+	return 0;
+}
+
 static int tegra_powergate_power_up(struct tegra_powergate *pg,
 				    bool disable_clocks)
 {

@@ -23,7 +23,6 @@
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/vmalloc.h>
-#include <drm/drm_drv.h>
 
 #include "amdgpu.h"
 #include "amdgpu_psp.h"
@@ -64,8 +63,6 @@ MODULE_FIRMWARE("amdgpu/vangogh_asd.bin");
 MODULE_FIRMWARE("amdgpu/vangogh_toc.bin");
 MODULE_FIRMWARE("amdgpu/dimgrey_cavefish_sos.bin");
 MODULE_FIRMWARE("amdgpu/dimgrey_cavefish_ta.bin");
-MODULE_FIRMWARE("amdgpu/beige_goby_sos.bin");
-MODULE_FIRMWARE("amdgpu/beige_goby_ta.bin");
 
 /* address block */
 #define smnMP1_FIRMWARE_FLAGS		0x3010024
@@ -117,9 +114,6 @@ static int psp_v11_0_init_microcode(struct psp_context *psp)
 		break;
 	case CHIP_DIMGREY_CAVEFISH:
 		chip_name = "dimgrey_cavefish";
-		break;
-	case CHIP_BEIGE_GOBY:
-		chip_name = "beige_goby";
 		break;
 	default:
 		BUG();
@@ -206,14 +200,6 @@ static int psp_v11_0_init_microcode(struct psp_context *psp)
 		if (err)
 			return err;
 		break;
-	case CHIP_BEIGE_GOBY:
-		err = psp_init_sos_microcode(psp, chip_name);
-		if (err)
-			return err;
-		err = psp_init_ta_microcode(psp, chip_name);
-		if (err)
-			return err;
-		break;
 	case CHIP_VANGOGH:
 		err = psp_init_asd_microcode(psp, chip_name);
 		if (err)
@@ -283,8 +269,10 @@ static int psp_v11_0_bootloader_load_kdb(struct psp_context *psp)
 	if (ret)
 		return ret;
 
+	memset(psp->fw_pri_buf, 0, PSP_1_MEG);
+
 	/* Copy PSP KDB binary to memory */
-	psp_copy_fw(psp, psp->kdb_start_addr, psp->kdb_bin_size);
+	memcpy(psp->fw_pri_buf, psp->kdb_start_addr, psp->kdb_bin_size);
 
 	/* Provide the PSP KDB to bootloader */
 	WREG32_SOC15(MP0, 0, mmMP0_SMN_C2PMSG_36,
@@ -314,8 +302,10 @@ static int psp_v11_0_bootloader_load_spl(struct psp_context *psp)
 	if (ret)
 		return ret;
 
+	memset(psp->fw_pri_buf, 0, PSP_1_MEG);
+
 	/* Copy PSP SPL binary to memory */
-	psp_copy_fw(psp, psp->spl_start_addr, psp->spl_bin_size);
+	memcpy(psp->fw_pri_buf, psp->spl_start_addr, psp->spl_bin_size);
 
 	/* Provide the PSP SPL to bootloader */
 	WREG32_SOC15(MP0, 0, mmMP0_SMN_C2PMSG_36,
@@ -345,8 +335,10 @@ static int psp_v11_0_bootloader_load_sysdrv(struct psp_context *psp)
 	if (ret)
 		return ret;
 
+	memset(psp->fw_pri_buf, 0, PSP_1_MEG);
+
 	/* Copy PSP System Driver binary to memory */
-	psp_copy_fw(psp, psp->sys_start_addr, psp->sys_bin_size);
+	memcpy(psp->fw_pri_buf, psp->sys_start_addr, psp->sys_bin_size);
 
 	/* Provide the sys driver to bootloader */
 	WREG32_SOC15(MP0, 0, mmMP0_SMN_C2PMSG_36,
@@ -379,8 +371,10 @@ static int psp_v11_0_bootloader_load_sos(struct psp_context *psp)
 	if (ret)
 		return ret;
 
+	memset(psp->fw_pri_buf, 0, PSP_1_MEG);
+
 	/* Copy Secure OS binary to PSP memory */
-	psp_copy_fw(psp, psp->sos_start_addr, psp->sos_bin_size);
+	memcpy(psp->fw_pri_buf, psp->sos_start_addr, psp->sos_bin_size);
 
 	/* Provide the PSP secure OS to bootloader */
 	WREG32_SOC15(MP0, 0, mmMP0_SMN_C2PMSG_36,
@@ -461,7 +455,6 @@ static int psp_v11_0_ring_create(struct psp_context *psp,
 	struct amdgpu_device *adev = psp->adev;
 
 	if (amdgpu_sriov_vf(adev)) {
-		ring->ring_wptr = 0;
 		ret = psp_v11_0_ring_stop(psp, ring_type);
 		if (ret) {
 			DRM_ERROR("psp_v11_0_ring_stop_sriov failed!\n");
@@ -615,7 +608,7 @@ static int psp_v11_0_memory_training(struct psp_context *psp, uint32_t ops)
 	uint32_t p2c_header[4];
 	uint32_t sz;
 	void *buf;
-	int ret, idx;
+	int ret;
 
 	if (ctx->init == PSP_MEM_TRAIN_NOT_SUPPORT) {
 		DRM_DEBUG("Memory training is not supported.\n");
@@ -688,24 +681,17 @@ static int psp_v11_0_memory_training(struct psp_context *psp, uint32_t ops)
 			return -ENOMEM;
 		}
 
-		if (drm_dev_enter(&adev->ddev, &idx)) {
-			memcpy_fromio(buf, adev->mman.aper_base_kaddr, sz);
-			ret = psp_v11_0_memory_training_send_msg(psp, PSP_BL__DRAM_LONG_TRAIN);
-			if (ret) {
-				DRM_ERROR("Send long training msg failed.\n");
-				vfree(buf);
-				drm_dev_exit(idx);
-				return ret;
-			}
-
-			memcpy_toio(adev->mman.aper_base_kaddr, buf, sz);
-			adev->hdp.funcs->flush_hdp(adev, NULL);
+		memcpy_fromio(buf, adev->mman.aper_base_kaddr, sz);
+		ret = psp_v11_0_memory_training_send_msg(psp, PSP_BL__DRAM_LONG_TRAIN);
+		if (ret) {
+			DRM_ERROR("Send long training msg failed.\n");
 			vfree(buf);
-			drm_dev_exit(idx);
-		} else {
-			vfree(buf);
-			return -ENODEV;
+			return ret;
 		}
+
+		memcpy_toio(adev->mman.aper_base_kaddr, buf, sz);
+		adev->hdp.funcs->flush_hdp(adev, NULL);
+		vfree(buf);
 	}
 
 	if (ops & PSP_MEM_TRAIN_SAVE) {

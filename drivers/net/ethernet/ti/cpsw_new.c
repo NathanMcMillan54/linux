@@ -373,8 +373,8 @@ static void cpsw_rx_handler(void *token, int len, int status)
 		cpts_rx_timestamp(cpsw->cpts, skb);
 	skb->protocol = eth_type_trans(skb, ndev);
 
-	/* mark skb for recycling */
-	skb_mark_for_recycle(skb, page, pool);
+	/* unmap page as no netstack skb page recycling */
+	page_pool_release_page(pool, page);
 	netif_receive_skb(skb);
 
 	ndev->stats.rx_bytes += len;
@@ -1883,7 +1883,8 @@ static int cpsw_probe(struct platform_device *pdev)
 	}
 	cpsw->bus_freq_mhz = clk_get_rate(clk) / 1000000;
 
-	ss_regs = devm_platform_get_and_ioremap_resource(pdev, 0, &ss_res);
+	ss_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	ss_regs = devm_ioremap_resource(dev, ss_res);
 	if (IS_ERR(ss_regs)) {
 		ret = PTR_ERR(ss_regs);
 		return ret;

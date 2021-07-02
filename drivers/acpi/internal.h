@@ -11,6 +11,8 @@
 
 #include <linux/idr.h>
 
+#define PREFIX "ACPI: "
+
 int early_acpi_osi_init(void);
 int acpi_osi_init(void);
 acpi_status acpi_os_initialize1(void);
@@ -86,7 +88,7 @@ void acpi_device_hotplug(struct acpi_device *adev, u32 src);
 bool acpi_scan_is_offline(struct acpi_device *adev, bool uevent);
 
 acpi_status acpi_sysfs_table_handler(u32 event, void *table, void *context);
-void acpi_scan_table_notify(void);
+void acpi_scan_table_handler(u32 event, void *table, void *context);
 
 /* --------------------------------------------------------------------------
                      Device Node Initialization / Removal
@@ -140,7 +142,7 @@ int acpi_device_sleep_wake(struct acpi_device *dev,
 int acpi_power_get_inferred_state(struct acpi_device *device, int *state);
 int acpi_power_on_resources(struct acpi_device *device, int state);
 int acpi_power_transition(struct acpi_device *device, int state);
-void acpi_turn_off_unused_power_resources(void);
+void acpi_turn_off_unused_power_resources(bool init);
 
 /* --------------------------------------------------------------------------
                               Device Power Management
@@ -232,15 +234,6 @@ static inline int suspend_nvs_alloc(void) { return 0; }
 static inline void suspend_nvs_free(void) {}
 static inline int suspend_nvs_save(void) { return 0; }
 static inline void suspend_nvs_restore(void) {}
-#endif
-
-#ifdef CONFIG_X86
-bool force_storage_d3(void);
-#else
-static inline bool force_storage_d3(void)
-{
-	return false;
-}
 #endif
 
 /*--------------------------------------------------------------------------

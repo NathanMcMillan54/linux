@@ -40,7 +40,7 @@
 			 role.direct ? " direct" : "",			\
 			 access_str[role.access],			\
 			 role.invalid ? " invalid" : "",		\
-			 role.efer_nx ? "" : "!",			\
+			 role.nxe ? "" : "!",				\
 			 role.ad_disabled ? "!" : "",			\
 			 __entry->root_count,				\
 			 __entry->unsync ? "unsync" : "sync", 0);	\

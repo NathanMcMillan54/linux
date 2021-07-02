@@ -171,7 +171,6 @@ struct dcn_optc_registers {
 	uint32_t OPTC_DATA_FORMAT_CONTROL;
 	uint32_t OPTC_BYTES_PER_PIXEL;
 	uint32_t OPTC_WIDTH_CONTROL;
-	uint32_t OTG_DRR_CONTROL;
 	uint32_t OTG_BLANK_DATA_COLOR;
 	uint32_t OTG_BLANK_DATA_COLOR_EXT;
 	uint32_t OTG_DRR_TRIGGER_WINDOW;
@@ -518,8 +517,7 @@ struct dcn_optc_registers {
 	type OTG_CRC_DSC_MODE;\
 	type OTG_CRC_DATA_STREAM_COMBINE_MODE;\
 	type OTG_CRC_DATA_STREAM_SPLIT_MODE;\
-	type OTG_CRC_DATA_FORMAT;\
-	type OTG_V_TOTAL_LAST_USED_BY_DRR;
+	type OTG_CRC_DATA_FORMAT;
 
 
 struct dcn_optc_shift {
@@ -667,8 +665,6 @@ void optc1_enable_optc_clock(struct timing_generator *optc, bool enable);
 void optc1_set_drr(
 	struct timing_generator *optc,
 	const struct drr_params *params);
-
-void optc1_set_vtotal_min_max(struct timing_generator *optc, int vtotal_min, int vtotal_max);
 
 void optc1_set_static_screen_control(
 	struct timing_generator *optc,

@@ -42,7 +42,6 @@
 #include <linux/kobject.h>
 #include <linux/dma-map-ops.h>
 #include <linux/interrupt.h>
-#include <linux/irqdomain.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/stat.h>

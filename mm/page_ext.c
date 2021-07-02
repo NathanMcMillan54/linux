@@ -191,7 +191,7 @@ fail:
 	panic("Out of memory");
 }
 
-#else /* CONFIG_FLATMEM */
+#else /* CONFIG_FLAT_NODE_MEM_MAP */
 
 struct page_ext *lookup_page_ext(const struct page *page)
 {

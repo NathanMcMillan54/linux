@@ -1283,8 +1283,8 @@ struct htt_dbg_stats_wal_tx_stats {
 	/* Num PPDUs cleaned up in TX abort */
 	__le32 tx_abort;
 
-	/* Num MPDUs requeued by SW */
-	__le32 mpdus_requeued;
+	/* Num MPDUs requed by SW */
+	__le32 mpdus_requed;
 
 	/* excessive retries */
 	__le32 tx_ko;

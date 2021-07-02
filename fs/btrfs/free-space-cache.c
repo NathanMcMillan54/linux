@@ -327,7 +327,7 @@ int btrfs_truncate_free_space_cache(struct btrfs_trans_handle *trans,
 	 * need to check for -EAGAIN.
 	 */
 	ret = btrfs_truncate_inode_items(trans, root, BTRFS_I(inode),
-					 0, BTRFS_EXTENT_DATA_KEY, NULL);
+					 0, BTRFS_EXTENT_DATA_KEY);
 	if (ret)
 		goto fail;
 

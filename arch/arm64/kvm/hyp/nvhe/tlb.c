@@ -104,7 +104,7 @@ void __kvm_tlb_flush_vmid_ipa(struct kvm_s2_mmu *mmu,
 	 * you should be running with VHE enabled.
 	 */
 	if (icache_is_vpipt())
-		icache_inval_all_pou();
+		__flush_icache_all();
 
 	__tlb_switch_to_host(&cxt);
 }

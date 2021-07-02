@@ -335,15 +335,10 @@ int psci_cpu_suspend_enter(u32 state)
 {
 	int ret;
 
-	if (!psci_power_state_loses_context(state)) {
-		struct arm_cpuidle_irq_context context;
-
-		arm_cpuidle_save_irq_context(&context);
+	if (!psci_power_state_loses_context(state))
 		ret = psci_ops.cpu_suspend(state, 0);
-		arm_cpuidle_restore_irq_context(&context);
-	} else {
+	else
 		ret = cpu_suspend(state, psci_suspend_finisher);
-	}
 
 	return ret;
 }

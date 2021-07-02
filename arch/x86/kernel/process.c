@@ -931,7 +931,7 @@ unsigned long get_wchan(struct task_struct *p)
 	unsigned long start, bottom, top, sp, fp, ip, ret = 0;
 	int count = 0;
 
-	if (p == current || task_is_running(p))
+	if (p == current || p->state == TASK_RUNNING)
 		return 0;
 
 	if (!try_get_task_stack(p))
@@ -975,7 +975,7 @@ unsigned long get_wchan(struct task_struct *p)
 			goto out;
 		}
 		fp = READ_ONCE_NOCHECK(*(unsigned long *)fp);
-	} while (count++ < 16 && !task_is_running(p));
+	} while (count++ < 16 && p->state != TASK_RUNNING);
 
 out:
 	put_task_stack(p);

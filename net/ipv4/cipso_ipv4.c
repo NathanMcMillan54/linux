@@ -187,7 +187,8 @@ static int __init cipso_v4_cache_init(void)
  * cipso_v4_cache_invalidate - Invalidates the current CIPSO cache
  *
  * Description:
- * Invalidates and frees any entries in the CIPSO cache.
+ * Invalidates and frees any entries in the CIPSO cache.  Returns zero on
+ * success and negative values on failure.
  *
  */
 void cipso_v4_cache_invalidate(void)

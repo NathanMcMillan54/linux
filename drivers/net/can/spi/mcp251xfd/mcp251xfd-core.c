@@ -560,7 +560,7 @@ mcp251xfd_chip_set_mode(const struct mcp251xfd_priv *priv,
 	return __mcp251xfd_chip_set_mode(priv, mode_req, false);
 }
 
-static inline int __maybe_unused
+static inline int
 mcp251xfd_chip_set_mode_nowait(const struct mcp251xfd_priv *priv,
 			       const u8 mode_req)
 {

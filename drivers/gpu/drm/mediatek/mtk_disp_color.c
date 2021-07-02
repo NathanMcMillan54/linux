@@ -30,8 +30,9 @@ struct mtk_disp_color_data {
 	unsigned int color_offset;
 };
 
-/*
+/**
  * struct mtk_disp_color - DISP_COLOR driver structure
+ * @ddp_comp: structure containing type enum and hardware resources
  * @crtc: associated crtc to report irq events to
  * @data: platform colour driver data
  */

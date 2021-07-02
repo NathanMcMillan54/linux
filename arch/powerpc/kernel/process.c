@@ -2084,7 +2084,7 @@ static unsigned long __get_wchan(struct task_struct *p)
 	unsigned long ip, sp;
 	int count = 0;
 
-	if (!p || p == current || task_is_running(p))
+	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
 
 	sp = p->thread.ksp;
@@ -2094,7 +2094,7 @@ static unsigned long __get_wchan(struct task_struct *p)
 	do {
 		sp = *(unsigned long *)sp;
 		if (!validate_sp(sp, p, STACK_FRAME_OVERHEAD) ||
-		    task_is_running(p))
+		    p->state == TASK_RUNNING)
 			return 0;
 		if (count > 0) {
 			ip = ((unsigned long *)sp)[STACK_FRAME_LR_SAVE];
